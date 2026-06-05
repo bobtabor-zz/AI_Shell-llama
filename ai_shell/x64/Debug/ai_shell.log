@@ -1,0 +1,14 @@
+﻿  engine.c
+C:\Users\btabor\source\ai_shell\engine\engine.c(31,14): warning C4013: 'vmm_create' undefined; assuming extern returning int
+C:\Users\btabor\source\ai_shell\engine\engine.c(31,30): warning C4047: '=': 'vmm_t *' differs in levels of indirection from 'int'
+C:\Users\btabor\source\ai_shell\engine\engine.c(43,20): warning C4996: 'llama_load_model_from_file': use llama_model_load_from_file instead
+C:\Users\btabor\source\ai_shell\engine\engine.c(53,18): warning C4996: 'llama_new_context_with_model': use llama_init_from_model instead
+C:\Users\btabor\source\ai_shell\engine\engine.c(56,9): warning C4996: 'llama_free_model': use llama_model_free instead
+C:\Users\btabor\source\ai_shell\engine\engine.c(74,23): warning C4996: 'llama_free_model': use llama_model_free instead
+C:\Users\btabor\source\ai_shell\engine\engine.c(160,36): warning C4133: 'function': incompatible types - from 'llama_model *' to 'const llama_vocab *'
+C:\Users\btabor\source\ai_shell\engine\engine.c(160,21): warning C4996: 'llama_n_vocab': use llama_vocab_n_tokens instead
+  gguf_loader.c
+C:\Users\btabor\source\ai_shell\loader\gguf_loader.c(221,17): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  vmm.c
+  Generating Code...
+LINK : fatal error LNK1104: cannot open file 'ggml-cpu.lib'

@@ -1,0 +1,5 @@
+﻿  engine.c
+C:\Users\btabor\source\llama.cpp\include\llama.h(4,10): fatal  error C1083: Cannot open include file: 'ggml.h': No such file or directory
+  gguf_loader.c
+C:\Users\btabor\source\ai_shell\loader\gguf_loader.c(221,17): warning C4996: 'fopen': This function or variable may be unsafe. Consider using fopen_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  vmm.c
