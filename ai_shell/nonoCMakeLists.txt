@@ -1,0 +1,42 @@
+cmake_minimum_required(VERSION 3.16)
+project(ai_shell_minimal C)
+
+set(CMAKE_C_STANDARD 11)
+
+# ------------------------------------------------------------------
+# llama.cpp (must already exist in ../llama.cpp)
+# ------------------------------------------------------------------
+add_subdirectory(../llama.cpp ${CMAKE_BINARY_DIR}/llama_build)
+
+# ------------------------------------------------------------------
+# Engine sources
+# ------------------------------------------------------------------
+add_library(engine STATIC
+    engine/engine.c
+    loader/gguf_loader.c
+    vmm/vmm.c
+)
+
+target_include_directories(engine PUBLIC
+    engine
+    loader
+    vmm
+    ../llama.cpp/include
+)
+
+target_link_libraries(engine PUBLIC llama)
+
+# ------------------------------------------------------------------
+# ai_shell executable
+# ------------------------------------------------------------------
+add_executable(ai_shell
+    ai_shell/ai_shell.c
+)
+
+target_include_directories(ai_shell PUBLIC
+    engine
+    loader
+    vmm
+)
+
+target_link_libraries(ai_shell PRIVATE engine)
