@@ -1,38 +1,60 @@
 #pragma once
-
 #include <stddef.h>
-#include <stdint.h>
-
-#include "../loader/gguf_loader.h"
-#include "../vmm/vmm.h"
 #include "llama.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
-    // Forward declaration
-    struct llama_model;
-    struct llama_context;
+    typedef struct {
+        char role[8];   // "User" / "AI"
+        char text[4096];
+    } engine_turn_t;
+
 
     typedef struct engine {
-        engine_gguf_loader_t* loader;
-        vmm_t* vmm;
+        struct llama_model* model;
+        struct llama_context* ctx;
+        int64_t pos;
+        //char conversation[16384];
 
-        struct llama_model* tok_model;
-        struct llama_context* tok_ctx;
+        engine_turn_t turns[128];
+        int n_turns;
+        // ⭐ KV subsystem
+        
+        bool    kv_valid;      // is there a meaningful sequence in KV?
+        int64_t kv_len;        // how many tokens are currently in KV?
 
     } engine_t;
 
-    // Open / close engine
+    void engine_recreate_context(engine_t* e);
+
+   int engine_chat(engine_t* e,
+        const char* user_input,
+        char* out,
+        size_t out_size);
+
+    /*void engine_kv_cache_clear(engine_t* e);*/
+
+    void cmd_open(int argc, char** argv);
+    void cmd_close(int argc, char** argv);
+    void cmd_infer(int argc, char** argv);
+
     engine_t* engine_open(const char* path);
-    void       engine_close(engine_t* e);
+    void      engine_close(engine_t* e);
 
-    // Forward pass
-    int engine_forward(engine_t* e, const float* input, float* output);
+    int engine_generate(
+        engine_t* e,
+        const char* prompt,
+        char* out,
+        size_t out_size,
+        int max_tokens,
+        float temp,
+        int top_k,
+        float top_p,
+        bool stream
+    );
 
-    // High‑level inference
-    int engine_infer(engine_t* e, const char* prompt, char* out, int out_size);
 
 #ifdef __cplusplus
 }

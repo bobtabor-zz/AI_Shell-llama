@@ -1,0 +1,103 @@
+Here's the recommended version using llama.cpp's official GGUF/model loader.1. Updated engine_open (Recommended)Replace your custom GGUF loader with this:c
+
+#include "llama.h"   // make sure this is included
+
+// ------------------------------------------------------------------
+// Structure for your engine
+// ------------------------------------------------------------------
+typedef struct {
+    struct llama_model*   model;
+    struct llama_context* ctx;
+    // add other fields you need (vocab, etc.)
+} engine_t;
+
+// ------------------------------------------------------------------
+// Open model using official llama.cpp loader
+// ------------------------------------------------------------------
+engine_t* engine_open(const char* model_path)
+{
+    fprintf(stderr, "[engine] loading model: %s\n", model_path);
+
+    // Model parameters
+    llama_model_params model_params = llama_model_default_params();
+    // model_params.n_gpu_layers = 0;     // set >0 if you have GPU support
+    // model_params.use_mmap = true;
+    // model_params.use_mlock = false;
+
+    struct llama_model* model = llama_load_model_from_file(model_path, model_params);
+    if (!model) {
+        fprintf(stderr, "[engine] llama_load_model_from_file failed\n");
+        return NULL;
+    }
+
+    // Context parameters
+    llama_context_params ctx_params = llama_context_default_params();
+    ctx_params.n_ctx     = 8192;        // adjust as needed
+    ctx_params.n_batch   = 512;
+    ctx_params.n_threads = 0;           // 0 = auto (number of logical cores)
+
+    struct llama_context* ctx = llama_new_context_with_model(model, ctx_params);
+    if (!ctx) {
+        fprintf(stderr, "[engine] llama_new_context_with_model failed\n");
+        llama_free_model(model);
+        return NULL;
+    }
+
+    engine_t* engine = (engine_t*)calloc(1, sizeof(engine_t));
+    if (!engine) {
+        llama_free(ctx);
+        llama_free_model(model);
+        return NULL;
+    }
+
+    engine->model = model;
+    engine->ctx   = ctx;
+
+    fprintf(stderr, "[engine] model loaded successfully!\n");
+    return engine;
+}
+
+2. Close functionc
+
+void engine_close(engine_t* engine)
+{
+    if (!engine) return;
+
+    if (engine->ctx)   llama_free(engine->ctx);
+    if (engine->model) llama_free_model(engine->model);
+
+    free(engine);
+}
+
+3. Minimal inference example (for engine_infer)c
+
+int engine_infer(engine_t* engine, const char* prompt, char* output, size_t output_size)
+{
+    if (!engine || !prompt) return -1;
+
+    // Tokenize
+    llama_token* tokens = malloc(4096 * sizeof(llama_token));  // adjust size
+    int n_tokens = llama_tokenize(engine->ctx, prompt, tokens, 4096, true);
+
+    if (n_tokens < 0) {
+        free(tokens);
+        return -1;
+    }
+
+    // You can now do decoding loop here using llama_decode, sampling, etc.
+    // For a simple start, you can use the high-level llama API or write your own loop.
+
+    // ... your generation logic here ...
+
+    free(tokens);
+    return 0;
+}
+
+What you should do now:Remove all your custom GGUF parsing code (gguf_loader.c can be simplified or mostly deleted).
+Update your engine.h to use the new engine_t structure.
+Make sure your .vcxproj has the correct include paths:xml
+
+<AdditionalIncludeDirectories>..\llama.cpp\include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+
+Rebuild.
+

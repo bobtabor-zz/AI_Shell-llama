@@ -1,45 +1,33 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
 <Project ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
   <ItemGroup>
-    <ClCompile Include="src\http_winhttp.c">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\server.c">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\util.c">
-      <Filter>src</Filter>
-    </ClCompile>
-    <ClCompile Include="src\pager.c">
-      <Filter>src</Filter>
-    </ClCompile>
     <ClCompile Include="engine\engine.c">
       <Filter>engine</Filter>
     </ClCompile>
     <ClCompile Include="loader\gguf_loader.c">
       <Filter>loader</Filter>
     </ClCompile>
-    <ClCompile Include="ai_shell\ai_shell.c">
-      <Filter>ai_shell</Filter>
-    </ClCompile>
     <ClCompile Include="vmm\vmm.c">
       <Filter>vmm</Filter>
     </ClCompile>
+    <ClCompile Include="main\ai_shell.c" />
+    <ClCompile Include="plugins\ddg.c">
+      <Filter>plugins</Filter>
+    </ClCompile>
+    <ClCompile Include="plugins\summarize_file.c">
+      <Filter>plugins</Filter>
+    </ClCompile>
+    <ClCompile Include="core\plugin.c">
+      <Filter>core</Filter>
+    </ClCompile>
+    <ClCompile Include="plugins\websearch.c">
+      <Filter>plugins</Filter>
+    </ClCompile>
+    <ClCompile Include="engine\engine_kv.c">
+      <Filter>engine</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="resource.h" />
-    <ClInclude Include="src\http_winhttp.h">
-      <Filter>src</Filter>
-    </ClInclude>
-    <ClInclude Include="src\server.h">
-      <Filter>src</Filter>
-    </ClInclude>
-    <ClInclude Include="src\util.h">
-      <Filter>src</Filter>
-    </ClInclude>
-    <ClInclude Include="src\pager.h">
-      <Filter>src</Filter>
-    </ClInclude>
     <ClInclude Include="engine\engine.h">
       <Filter>engine</Filter>
     </ClInclude>
@@ -48,6 +36,12 @@
     </ClInclude>
     <ClInclude Include="vmm\vmm.h">
       <Filter>vmm</Filter>
+    </ClInclude>
+    <ClInclude Include="include\plugin.h">
+      <Filter>include</Filter>
+    </ClInclude>
+    <ClInclude Include="engine\engine_kv.h">
+      <Filter>engine</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -66,12 +60,14 @@
     <Filter Include="ai_shell">
       <UniqueIdentifier>{49ffcd0a-198b-4c6c-8f9f-dce682797f4e}</UniqueIdentifier>
     </Filter>
-  </ItemGroup>
-  <ItemGroup>
-    <ResourceCompile Include="ai_shell.rc" />
-  </ItemGroup>
-  <ItemGroup>
-    <Text Include="CMakeListsold.txt" />
-    <Text Include="CMakeLists.txt" />
+    <Filter Include="include">
+      <UniqueIdentifier>{3e34232e-e14f-4c4b-8e7f-0bdd5dd882cd}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="plugins">
+      <UniqueIdentifier>{858d10b9-ca43-4f9e-b9a1-6ae09ee3f264}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="core">
+      <UniqueIdentifier>{1aea78e3-c4f7-4bd4-87ca-fa4b4d04c89b}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>

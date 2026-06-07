@@ -48,6 +48,25 @@ static void init_type_tables(void) {
     g_tables_init = 1;
 }
 
+enum {
+    GGUF_SCALAR_BOOL = 0,
+    GGUF_SCALAR_U8 = 1,
+    GGUF_SCALAR_I8 = 2,
+    GGUF_SCALAR_U16 = 3,
+    GGUF_SCALAR_I16 = 4,
+    GGUF_SCALAR_U32 = 5,
+    GGUF_SCALAR_I32 = 6,
+    GGUF_SCALAR_F32 = 7,
+    GGUF_SCALAR_U64 = 8,
+    GGUF_SCALAR_I64 = 9,
+    GGUF_SCALAR_F64 = 10,
+    GGUF_SCALAR_STR = 11,
+    GGUF_SCALAR_ARR = 12,
+    GGUF_SCALAR_BYTE_BUFFER = 13,   // ⭐ NEW — required for GGUF v3
+    GGUF_SCALAR_BOOL_ARR = 14,   // ⭐ NEW
+    GGUF_SCALAR_I8_ARR = 15    // ⭐ NEW
+};
+
 static void ensure_tables(void) {
     if (!g_tables_init) {
         init_type_tables();
@@ -109,187 +128,288 @@ static int skip_bytes(uint64_t size, uint64_t * off, uint64_t n) {
     return 1;
 }
 
-// GGUF scalar type tags (minimal subset)
-enum {
-    GGUF_SCALAR_BOOL = 0,
-    GGUF_SCALAR_U8   = 1,
-    GGUF_SCALAR_I8   = 2,
-    GGUF_SCALAR_U16  = 3,
-    GGUF_SCALAR_I16  = 4,
-    GGUF_SCALAR_U32  = 5,
-    GGUF_SCALAR_I32  = 6,
-    GGUF_SCALAR_F32  = 7,
-    GGUF_SCALAR_U64  = 8,
-    GGUF_SCALAR_I64  = 9,
-    GGUF_SCALAR_F64  = 10,
-    GGUF_SCALAR_STR  = 11,
-    GGUF_SCALAR_ARR  = 12,
-};
-
-static int skip_kv_value(const uint8_t * base, uint64_t size, uint64_t * off, uint32_t type) {
+static int skip_kv_value(const uint8_t* base, uint64_t size, uint64_t* off, uint32_t type) {
     int ok = 1;
 
     switch (type) {
-        case GGUF_SCALAR_BOOL:
-        case GGUF_SCALAR_U8:
-        case GGUF_SCALAR_I8:
-            ok = skip_bytes(size, off, 1);
-            break;
-        case GGUF_SCALAR_U16:
-        case GGUF_SCALAR_I16:
-            ok = skip_bytes(size, off, 2);
-            break;
-        case GGUF_SCALAR_U32:
-        case GGUF_SCALAR_I32:
-        case GGUF_SCALAR_F32:
-            ok = skip_bytes(size, off, 4);
-            break;
-        case GGUF_SCALAR_U64:
-        case GGUF_SCALAR_I64:
-        case GGUF_SCALAR_F64:
-            ok = skip_bytes(size, off, 8);
-            break;
-        case GGUF_SCALAR_STR:
-            {
+
+        // ---------------------------------------------------------
+        // Simple scalar types
+        // ---------------------------------------------------------
+    case GGUF_SCALAR_BOOL:
+    case GGUF_SCALAR_U8:
+    case GGUF_SCALAR_I8:
+        ok = skip_bytes(size, off, 1);
+        break;
+
+    case GGUF_SCALAR_U16:
+    case GGUF_SCALAR_I16:
+        ok = skip_bytes(size, off, 2);
+        break;
+
+    case GGUF_SCALAR_U32:
+    case GGUF_SCALAR_I32:
+    case GGUF_SCALAR_F32:
+        ok = skip_bytes(size, off, 4);
+        break;
+
+    case GGUF_SCALAR_U64:
+    case GGUF_SCALAR_I64:
+    case GGUF_SCALAR_F64:
+        ok = skip_bytes(size, off, 8);
+        break;
+
+        // ---------------------------------------------------------
+        // String
+        // ---------------------------------------------------------
+    case GGUF_SCALAR_STR:
+    {
+        uint64_t sl = 0;
+        if (!read_u64(base, size, off, &sl)) return 0;
+        ok = skip_bytes(size, off, sl);
+    } break;
+
+    // ---------------------------------------------------------
+    // NEW in GGUF v3: BYTE BUFFER
+    // ---------------------------------------------------------
+    case GGUF_SCALAR_BYTE_BUFFER:
+    {
+        uint64_t bl = 0;
+        if (!read_u64(base, size, off, &bl)) return 0;
+        ok = skip_bytes(size, off, bl);
+    } break;
+
+    // ---------------------------------------------------------
+    // Array
+    // ---------------------------------------------------------
+    case GGUF_SCALAR_ARR:
+    {
+        uint32_t arr_type = 0;
+        uint64_t arr_len = 0;
+
+        if (!read_u32(base, size, off, &arr_type)) return 0;
+        if (!read_u64(base, size, off, &arr_len))  return 0;
+
+        // Array of strings
+        if (arr_type == GGUF_SCALAR_STR) {
+            for (uint64_t j = 0; j < arr_len && ok; ++j) {
                 uint64_t sl = 0;
-                if (!read_u64(base, size, off, &sl)) {
-                    return 0;
-                }
+                if (!read_u64(base, size, off, &sl)) return 0;
                 ok = skip_bytes(size, off, sl);
             }
-            break;
-        case GGUF_SCALAR_ARR:
-            {
-                uint32_t arr_type = 0;
-                uint64_t arr_len  = 0;
-                if (!read_u32(base, size, off, &arr_type)) {
-                    return 0;
-                }
-                if (!read_u64(base, size, off, &arr_len)) {
-                    return 0;
-                }
+        }
 
-                if (arr_type == GGUF_SCALAR_STR) {
-                    for (uint64_t j = 0; j < arr_len && ok; ++j) {
-                        uint64_t sl = 0;
-                        if (!read_u64(base, size, off, &sl)) {
-                            return 0;
-                        }
-                        ok = skip_bytes(size, off, sl);
-                    }
-                } else {
-                    size_t elem_size = 0;
-                    switch (arr_type) {
-                        case GGUF_SCALAR_BOOL:
-                        case GGUF_SCALAR_U8:
-                        case GGUF_SCALAR_I8:
-                            elem_size = 1;
-                            break;
-                        case GGUF_SCALAR_U16:
-                        case GGUF_SCALAR_I16:
-                            elem_size = 2;
-                            break;
-                        case GGUF_SCALAR_U32:
-                        case GGUF_SCALAR_I32:
-                        case GGUF_SCALAR_F32:
-                            elem_size = 4;
-                            break;
-                        case GGUF_SCALAR_U64:
-                        case GGUF_SCALAR_I64:
-                        case GGUF_SCALAR_F64:
-                            elem_size = 8;
-                            break;
-                        default:
-                            return 0;
-                    }
-                    ok = skip_bytes(size, off, (uint64_t) elem_size * arr_len);
-                }
+        // Array of byte buffers (GGUF v3)
+        else if (arr_type == GGUF_SCALAR_BYTE_BUFFER) {
+            for (uint64_t j = 0; j < arr_len && ok; ++j) {
+                uint64_t bl = 0;
+                if (!read_u64(base, size, off, &bl)) return 0;
+                ok = skip_bytes(size, off, bl);
             }
-            break;
-        default:
-            return 0;
+        }
+
+        // Array of numeric scalars
+        else {
+            size_t elem_size = 0;
+            switch (arr_type) {
+            case GGUF_SCALAR_BOOL:
+            case GGUF_SCALAR_U8:
+            case GGUF_SCALAR_I8:
+                elem_size = 1; break;
+
+            case GGUF_SCALAR_U16:
+            case GGUF_SCALAR_I16:
+                elem_size = 2; break;
+
+            case GGUF_SCALAR_U32:
+            case GGUF_SCALAR_I32:
+            case GGUF_SCALAR_F32:
+                elem_size = 4; break;
+
+            case GGUF_SCALAR_U64:
+            case GGUF_SCALAR_I64:
+            case GGUF_SCALAR_F64:
+                elem_size = 8; break;
+
+            case GGUF_SCALAR_BOOL_ARR:
+            {
+                uint64_t len = 0;
+                if (!read_u64(base, size, off, &len)) return 0;
+                ok = skip_bytes(size, off, len);   // 1 byte per bool
+            } break;
+
+            case GGUF_SCALAR_I8_ARR:
+            {
+                uint64_t len = 0;
+                if (!read_u64(base, size, off, &len)) return 0;
+                ok = skip_bytes(size, off, len);   // 1 byte per int8
+            } break;
+
+
+            default:
+                fprintf(stderr, "[gguf] unknown KV type=%u at off=%llu\n",
+                    type, (unsigned long long) * off);
+                return 0; // unknown array element type
+            }
+
+            ok = skip_bytes(size, off, (uint64_t)elem_size * arr_len);
+        }
+    } break;
+
+    // ---------------------------------------------------------
+    // Unknown type → fail
+    // ---------------------------------------------------------
+    default:
+        return 0;
     }
 
     return ok;
 }
 
+
 // -----------------------------------------------------------------------------
 // open / close
 // -----------------------------------------------------------------------------
 
-engine_gguf_loader_t * engine_gguf_open(const char * path) {
-    FILE * fp = fopen(path, "rb");
+engine_gguf_loader_t* engine_gguf_open(const char* path) {
+    fprintf(stderr, "[gguf] open '%s'\n", path);
+
+    FILE* fp = fopen(path, "rb");
     if (!fp) {
         fprintf(stderr, "[gguf_open] failed to open %s\n", path);
         return NULL;
     }
 
-    fseek(fp, 0, SEEK_END);
-    long fsz = ftell(fp);
+    // -------------------------------------------------------------
+    // 64‑bit file size (Windows-safe)
+    // -------------------------------------------------------------
+    uint64_t fsz = 0;
+
+#if defined(_WIN32)
+    if (_fseeki64(fp, 0, SEEK_END) != 0) {
+        fprintf(stderr, "[gguf_open] _fseeki64 failed\n");
+        fclose(fp);
+        return NULL;
+    }
+
+    __int64 fsz64 = _ftelli64(fp);
+    if (fsz64 <= 0) {
+        fprintf(stderr, "[gguf_open] file too small or size overflow\n");
+        fclose(fp);
+        return NULL;
+    }
+
+    fsz = (uint64_t)fsz64;
+
+    if (_fseeki64(fp, 0, SEEK_SET) != 0) {
+        fprintf(stderr, "[gguf_open] _fseeki64 reset failed\n");
+        fclose(fp);
+        return NULL;
+    }
+#else
+    if (fseek(fp, 0, SEEK_END) != 0) {
+        fclose(fp);
+        return NULL;
+    }
+
+    long fsz_long = ftell(fp);
+    if (fsz_long <= 0) {
+        fprintf(stderr, "[gguf_open] file too small or size overflow\n");
+        fclose(fp);
+        return NULL;
+    }
+
+    fsz = (uint64_t)fsz_long;
     fseek(fp, 0, SEEK_SET);
+#endif
 
-    if (fsz <= 0) {
-        fclose(fp);
-        return NULL;
-    }
-
-    uint8_t * buf = (uint8_t *) malloc((size_t) fsz);
+    // -------------------------------------------------------------
+    // Read entire file into memory
+    // -------------------------------------------------------------
+    uint8_t* buf = (uint8_t*)malloc((size_t)fsz);
     if (!buf) {
+        fprintf(stderr, "[gguf_open] malloc failed (%llu bytes)\n",
+            (unsigned long long)fsz);
         fclose(fp);
         return NULL;
     }
 
-    if (fread(buf, 1, (size_t) fsz, fp) != (size_t) fsz) {
+    if (fread(buf, 1, (size_t)fsz, fp) != (size_t)fsz) {
+        fprintf(stderr, "[gguf_open] fread failed\n");
         free(buf);
         fclose(fp);
         return NULL;
     }
     fclose(fp);
 
-    engine_gguf_loader_t * ctx = (engine_gguf_loader_t *) calloc(1, sizeof(engine_gguf_loader_t));
+    // -------------------------------------------------------------
+    // Allocate loader context
+    // -------------------------------------------------------------
+    engine_gguf_loader_t* ctx =
+        (engine_gguf_loader_t*)calloc(1, sizeof(engine_gguf_loader_t));
+
     if (!ctx) {
         free(buf);
         return NULL;
     }
 
     ctx->base = buf;
-    ctx->size = (uint64_t) fsz;
+    ctx->size = fsz;
 
-    // parse header
+    // -------------------------------------------------------------
+    // Parse GGUF header
+    // -------------------------------------------------------------
     uint64_t off = 0;
 
     if (ctx->size < 4 + 4 + 8 + 8) {
-        fprintf(stderr, "[gguf_open] file too small\n");
+        fprintf(stderr, "[gguf_open] file too small for header\n");
         engine_gguf_close(ctx);
         return NULL;
     }
 
-    // magic "GGUF"
+    // magic
     if (memcmp(ctx->base, "GGUF", 4) != 0) {
         fprintf(stderr, "[gguf_open] bad magic\n");
         engine_gguf_close(ctx);
         return NULL;
     }
+    // after magic "GGUF"
     off += 4;
 
-    uint32_t version   = 0;
+    uint32_t version = 0;
     uint64_t n_tensors = 0;
-    uint64_t n_kv      = 0;
+    uint64_t n_kv = 0;
+    uint32_t alignment = 0;   // extra field after n_kv
 
-    if (!read_u32(ctx->base, ctx->size, &off, &version) || !read_u64(ctx->base, ctx->size, &off, &n_tensors) ||
-        !read_u64(ctx->base, ctx->size, &off, &n_kv)) {
+    if (!read_u32(ctx->base, ctx->size, &off, &version) ||
+        !read_u64(ctx->base, ctx->size, &off, &n_tensors) ||
+        !read_u64(ctx->base, ctx->size, &off, &n_kv) ||
+        !read_u32(ctx->base, ctx->size, &off, &alignment)) {
+
         engine_gguf_close(ctx);
         return NULL;
     }
 
-    ctx->hdr.version   = version;
+    ctx->hdr.version = version;
     ctx->hdr.n_tensors = n_tensors;
-    ctx->hdr.n_kv      = n_kv;
+    ctx->hdr.n_kv = n_kv;
 
-    // skip KV section
-    for (uint64_t i = 0; i < n_kv; ++i) {
+    fprintf(stderr,
+        "[gguf] version=%u n_tensors=%llu n_kv=%llu alignment=%u\n",
+        version,
+        (unsigned long long)n_tensors,
+        (unsigned long long)n_kv,
+        alignment);
+
+
+
+
+    // -------------------------------------------------------------
+    // Skip KV section
+    // -------------------------------------------------------------
+    for (uint64_t i = 0; i < ctx->hdr.n_kv; ++i) {
         uint64_t key_len = 0;
-        uint32_t type    = 0;
+        uint32_t type = 0;
 
         if (!read_u64(ctx->base, ctx->size, &off, &key_len)) {
             engine_gguf_close(ctx);
@@ -304,76 +424,79 @@ engine_gguf_loader_t * engine_gguf_open(const char * path) {
             return NULL;
         }
         if (!skip_kv_value(ctx->base, ctx->size, &off, type)) {
+            fprintf(stderr, "[gguf_open] KV parse failed at entry %llu (type=%u)\n",
+                (unsigned long long)i, type);
             engine_gguf_close(ctx);
             return NULL;
         }
     }
 
-    // tensor infos
-    ctx->tensors = (engine_gguf_tensor_info_t *) calloc((size_t) n_tensors, sizeof(engine_gguf_tensor_info_t));
+
+    // -------------------------------------------------------------
+    // Tensor metadata
+    // -------------------------------------------------------------
+    ctx->tensors = (engine_gguf_tensor_info_t*)
+        calloc((size_t)ctx->hdr.n_tensors, sizeof(engine_gguf_tensor_info_t));
+
     if (!ctx->tensors) {
+        fprintf(stderr, "[gguf_open] tensor alloc failed\n");
         engine_gguf_close(ctx);
         return NULL;
     }
 
-    for (uint64_t i = 0; i < n_tensors; ++i) {
-        engine_gguf_tensor_info_t * ti = &ctx->tensors[i];
+    for (uint64_t i = 0; i < ctx->hdr.n_tensors; ++i) {
+        engine_gguf_tensor_info_t* ti = &ctx->tensors[i];
 
         uint64_t name_len = 0;
-        if (!read_u64(ctx->base, ctx->size, &off, &name_len)) {
-            engine_gguf_close(ctx);
-            return NULL;
-        }
-        if (off + name_len > ctx->size) {
+        if (!read_u64(ctx->base, ctx->size, &off, &name_len) ||
+            off + name_len > ctx->size) {
+
+            fprintf(stderr, "[gguf_open] tensor name read failed\n");
             engine_gguf_close(ctx);
             return NULL;
         }
 
-        ti->name = (char *) malloc((size_t) name_len + 1);
-        if (!ti->name) {
-            engine_gguf_close(ctx);
-            return NULL;
-        }
-        memcpy(ti->name, ctx->base + off, (size_t) name_len);
+        ti->name = (char*)malloc((size_t)name_len + 1);
+        memcpy(ti->name, ctx->base + off, (size_t)name_len);
         ti->name[name_len] = 0;
         off += name_len;
 
-        uint32_t n_dims = 0;
-        uint32_t type   = 0;
-        if (!read_u32(ctx->base, ctx->size, &off, &n_dims) || !read_u32(ctx->base, ctx->size, &off, &type)) {
+        if (!read_u32(ctx->base, ctx->size, &off, &ti->n_dims) ||
+            !read_u32(ctx->base, ctx->size, &off, &ti->type)) {
+
+            fprintf(stderr, "[gguf_open] tensor dims/type failed\n");
             engine_gguf_close(ctx);
             return NULL;
         }
 
-        ti->n_dims = n_dims;
-        ti->type   = type;
-
-        ti->dims = (uint64_t *) calloc(n_dims, sizeof(uint64_t));
+        ti->dims = (uint64_t*)calloc(ti->n_dims, sizeof(uint64_t));
         if (!ti->dims) {
+            fprintf(stderr, "[gguf_open] dims alloc failed\n");
             engine_gguf_close(ctx);
             return NULL;
         }
 
-        for (uint32_t d = 0; d < n_dims; ++d) {
+        for (uint32_t d = 0; d < ti->n_dims; ++d) {
             if (!read_u64(ctx->base, ctx->size, &off, &ti->dims[d])) {
+                fprintf(stderr, "[gguf_open] dim read failed\n");
                 engine_gguf_close(ctx);
                 return NULL;
             }
         }
 
-        uint64_t off_data = 0;
-        if (!read_u64(ctx->base, ctx->size, &off, &off_data)) {
+        if (!read_u64(ctx->base, ctx->size, &off, &ti->offset)) {
+            fprintf(stderr, "[gguf_open] offset read failed\n");
             engine_gguf_close(ctx);
             return NULL;
         }
-        ti->offset = off_data;
     }
 
-    // tensor data section starts at current offset
     ctx->hdr.tensor_data_offset = off;
-
     return ctx;
 }
+
+
+
 
 void engine_gguf_close(engine_gguf_loader_t * ctx) {
     if (!ctx) {

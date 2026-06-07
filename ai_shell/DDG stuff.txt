@@ -1,0 +1,193 @@
+// URL decode (for DuckDuckGo redirect links)
+char* url_encode(const char* s) {
+    const char* hex = "0123456789ABCDEF";
+    size_t len = strlen(s);
+    char* out = malloc(len * 3 + 1);
+    if (!out) return NULL;
+
+    char* p = out;
+    for (; *s; s++) {
+        unsigned char c = (unsigned char)*s;
+        if ((c >= 'A' && c <= 'Z') ||
+            (c >= 'a' && c <= 'z') ||
+            (c >= '0' && c <= '9') ||
+            c == '-' || c == '_' || c == '.' || c == '~') {
+            *p++ = c;
+        }
+        else if (c == ' ') {
+            *p++ = '%'; *p++ = '2'; *p++ = '0';
+        }
+        else {
+            *p++ = '%';
+            *p++ = hex[c >> 4];
+            *p++ = hex[c & 15];
+        }
+    }
+    *p = '\0';
+    return out;
+}
+
+
+// URL decode (for DuckDuckGo redirect links)
+char* url_decode(const char* src) {
+    size_t len = strlen(src);
+    char* out = malloc(len + 1);
+    char* p = out;
+
+    for (size_t i = 0; i < len; i++) {
+        if (src[i] == '%' && i + 2 < len) {
+            int val;
+            sscanf(src + i + 1, "%2x", &val);
+            *p++ = (char)val;
+            i += 2;
+        }
+        else if (src[i] == '+') {
+            *p++ = ' ';
+        }
+        else {
+            *p++ = src[i];
+        }
+    }
+
+    *p = '\0';
+    return out;
+}   // <-- THIS WAS MISSING
+
+
+
+// Extract substring between two markers
+char* extract_between(const char* src, const char* start, const char* end) {
+    const char* p1 = strstr(src, start);
+    if (!p1) return NULL;
+    p1 += strlen(start);
+
+    const char* p2 = strstr(p1, end);
+    if (!p2) return NULL;
+
+    size_t len = (size_t)(p2 - p1);
+    char* out = malloc(len + 1);
+    if (!out) return NULL;
+
+    memcpy(out, p1, len);
+    out[len] = '\0';
+    return out;
+}
+
+
+//
+// ------------------------------------------------------------
+//  DuckDuckGo HTML Search Tool
+// ------------------------------------------------------------
+//
+
+//int engine_tool_search(const char* query, char** out_json)
+//{
+//    if (!out_json) return -1;
+//    *out_json = NULL;
+//
+//    // URL encode query
+//    char* q = url_encode(query ? query : "");
+//    if (!q) return -1;
+//
+//    // Build DuckDuckGo HTML path
+//    wchar_t path[1024];
+//    swprintf(path, 1024, L"/html/?q=%S", q);
+//    free(q);
+//
+//    // Minimal headers
+//    const wchar_t* headers[] = {
+//        L"User-Agent: AI_Shell",
+//        NULL
+//    };
+//
+//    // Perform HTTPS GET
+//    char* body = http_get_with_headers(
+//        L"duckduckgo.com",
+//        443,
+//        path,
+//        headers
+//    );
+//
+//    if (!body) {
+//        *out_json = _strdup("{\"error\":\"DuckDuckGo request failed\"}");
+//        return 0;
+//    }
+//
+//    // Build JSON output
+//    char* results_json = malloc(4096);
+//    strcpy(results_json, "{\"source\":\"duckduckgo\",\"results\":[");
+//
+//    const char* cursor = body;
+//    int count = 0;
+//
+//    while (count < 3) {
+//        const char* a_tag = strstr(cursor, "class=\"result__a\"");
+//        if (!a_tag) break;
+//
+//        //
+//        // URL extraction + redirect cleanup
+//        //
+//        char* raw_url = extract_between(a_tag, "href=\"", "\"");
+//        if (!raw_url) break;
+//
+//        char* clean_url = NULL;
+//        char* uddg = strstr(raw_url, "uddg=");
+//        if (uddg) {
+//            uddg += 5;
+//            clean_url = url_decode(uddg);
+//        }
+//        else {
+//            clean_url = _strdup(raw_url);
+//        }
+//        free(raw_url);
+//
+//        //
+//        // Title extraction
+//        //
+//        char* title = extract_between(a_tag, ">", "</a>");
+//        if (!title) {
+//            free(clean_url);
+//            break;
+//        }
+//
+//        //
+//        // Snippet extraction
+//        //
+//       
+//        char* snippet = extract_between(a_tag,
+//            "<span class=\"result__snippet\">",
+//            "</span>");
+//
+//        if (!snippet) {
+//            snippet = _strdup("");
+//        }
+//
+//        //
+//        // Append JSON entry
+//        //
+//        if (count > 0) strcat(results_json, ",");
+//
+//        char entry[2048];
+//        snprintf(entry, sizeof(entry),
+//            "{\"title\":\"%s\",\"url\":\"%s\",\"snippet\":\"%s\"}",
+//            title, clean_url, snippet);
+//
+//        strcat(results_json, entry);
+//
+//        //
+//        // Cleanup
+//        //
+//        free(title);
+//        free(clean_url);
+//        free(snippet);
+//
+//        cursor = a_tag + 1;
+//        count++;
+//    }
+//
+//    strcat(results_json, "]}");
+//
+//    *out_json = results_json;
+//    free(body);
+//    return 0;
+//}
