@@ -1,5 +1,6 @@
 #include "../engine/engine.h"
 #include "llama.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -195,11 +196,12 @@ static void dispatch(char* line) {
         }
 
         if (engine_chat(g_engine, user_msg, reply, sizeof(reply)) == 0) {
-            printf("AI> %s\n", reply);
+            //printf("AI> %s\n", reply);
         }
         else {
             printf("ERR chat_failed\n");
         }
+        printf("\n");
     }
 
 

@@ -69,5 +69,8 @@
     <Filter Include="core">
       <UniqueIdentifier>{1aea78e3-c4f7-4bd4-87ca-fa4b4d04c89b}</UniqueIdentifier>
     </Filter>
+    <Filter Include="llama">
+      <UniqueIdentifier>{092a5475-7f7b-4df9-84a3-cf749edbbefc}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
 </Project>

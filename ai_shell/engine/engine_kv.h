@@ -14,3 +14,5 @@ void engine_kv_advance(engine_t* e, int64_t n_gen);
 // Debug helper (optional)
 void engine_kv_debug(const engine_t* e);
 
+void safe_engine_batch_free(struct llama_batch* batch);
+

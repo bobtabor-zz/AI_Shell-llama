@@ -38,50 +38,48 @@ static void llama_batch_add(
 //
 
 
-#define MAX_TURNS 32
+void sanitize(char* s) {
+    for (int i = 0; s[i]; i++) {
+        if (s[i] == '<' || s[i] == '|' || s[i] == '>') {
+            s[i] = ' ';
+        }
+    }
+}
+
 
 void engine_append_turn(engine_t* e, const char* role, const char* text) {
     if (e->n_turns >= MAX_TURNS) {
-        // shift left, drop oldest
-        for (int i = 1; i < e->n_turns; ++i) {
+        for (int i = 1; i < e->n_turns; ++i)
             e->turns[i - 1] = e->turns[i];
-        }
         e->n_turns--;
     }
 
     engine_turn_t* t = &e->turns[e->n_turns++];
-    strncpy(t->role, role, sizeof(t->role) - 1);
-    t->role[sizeof(t->role) - 1] = '\0';
 
+    memset(t, 0, sizeof(*t));   // <-- REQUIRED
+
+    strncpy(t->role, role, sizeof(t->role) - 1);
     strncpy(t->text, text, sizeof(t->text) - 1);
-    t->text[sizeof(t->text) - 1] = '\0';
 }
 
 
-void engine_build_prompt(engine_t* e,
-    const char* user_input,
-    char* out,
-    size_t out_size)
-{
-    size_t len = 0;
-    out[0] = '\0';
+void engine_build_prompt(engine_t* e, char* out, size_t out_sz) {
+    out[0] = 0;  // <-- REQUIRED
 
-    for (int i = 0; i < e->n_turns; ++i) {
-        const engine_turn_t* t = &e->turns[i];
-        int n = snprintf(out + len, out_size - len,
-            "%s: %s\n",
-            t->role,
-            t->text);
-        if (n < 0 || (size_t)n >= out_size - len)
-            break;
-        len += (size_t)n;
+    strcat(out, "<|system|>\nYou are a helpful assistant.\n\n");
+
+    for (int i = 0; i < e->n_turns; i++) {
+        strcat(out, "<|");
+        strcat(out, e->turns[i].role);
+        strcat(out, "|>\n");
+        strcat(out, e->turns[i].text);
+        strcat(out, "\n\n");
     }
 
-    // append new user turn and AI header
-    snprintf(out + len, out_size - len,
-        "User: %s\nAI: ",
-        user_input);
+    strcat(out, "<|assistant|>\n");
 }
+
+
 
 static bool engine_has_gpu(void) {
     // Call the exact function verified by your dumpbin check
@@ -529,6 +527,146 @@ static llama_token sample_next(engine_t* e, float temp, int top_k, float top_p) 
 //    return (int)out_len;
 //}
 
+//int engine_generate(
+//    engine_t* e,
+//    const char* prompt,
+//    char* out,
+//    size_t out_size,
+//    int max_tokens,
+//    float temp,
+//    int top_k,
+//    float top_p,
+//    bool stream)
+//{
+//    if (!e || !e->model || !e->ctx || !prompt || !out || out_size == 0)
+//        return -1;
+//
+//    out[0] = '\0';
+//    if (prompt[0] == '\0') return 0;
+//
+//    // ====================== FAST SETTINGS ======================
+//    max_tokens = 16;      // bump later if you want
+//    temp = 0.7f;
+//    top_k = 20;
+//    top_p = 0.9f;
+//
+//    
+//        // ❌ NO engine_kv_clear(e) HERE ANYMORE replaced by llama_memory_seq_rm
+//    // Context is already recreated by the caller (chat / summarize).
+//    //engine_kv_clear(e);
+//
+//    // ====================== TOKENIZE ======================
+//    const int max_prompt_tokens = 4096;
+//    llama_token* tokens = malloc(max_prompt_tokens * sizeof(llama_token));
+//    if (!tokens) return -1;
+//
+//    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
+//
+//    int n_prompt = llama_tokenize(
+//        vocab,
+//        prompt,
+//        (int32_t)strlen(prompt),
+//        tokens,
+//        max_prompt_tokens,
+//        true,
+//        false
+//    );
+//
+//    if (n_prompt <= 0) {
+//        fprintf(stderr, "[engine] tokenize failed\n");
+//        free(tokens);
+//        return -1;
+//    }
+//
+//    // ====================== BATCH ======================
+//    llama_batch batch = llama_batch_init(1024, 0, 1);
+//
+//    int64_t cur_pos = 0;  // fresh context → start at 0
+//
+//    // Add prompt
+//    for (int i = 0; i < n_prompt; ++i) {
+//        llama_batch_add(
+//            &batch,
+//            tokens[i],
+//            (llama_pos)cur_pos,
+//            (const int[]) {
+//            0
+//        },          // single sequence
+//            i == n_prompt - 1
+//        );
+//        cur_pos++;
+//    }
+//
+//    if (llama_decode(e->ctx, batch) != 0) {
+//        fprintf(stderr, "[engine] decode(prompt) failed\n");
+//        free(tokens);
+//        return -1;
+//    }
+//
+//    // ❌ NO engine_kv_mark_prompt(e, n_prompt);
+//
+//    // ====================== GENERATION LOOP ======================
+//    size_t out_len = 0;
+//    int    n_gen = 0;
+//
+//    while (n_gen < max_tokens && out_len + 32 < out_size) {
+//        llama_token tok = sample_next(e, temp, top_k, top_p);
+//        if (tok == llama_token_eos(e->model))
+//            break;
+//
+//        char buf[128] = { 0 };
+//        int n = llama_token_to_piece(
+//            llama_model_get_vocab(e->model),
+//            tok,
+//            buf,
+//            sizeof(buf),
+//            0,
+//            false
+//        );
+//        if (n <= 0) break;
+//
+//        if (out_len + (size_t)n >= out_size) break;
+//
+//        memcpy(out + out_len, buf, n);
+//        out_len += n;
+//        out[out_len] = '\0';
+//
+//        if (stream) {
+//            fwrite(buf, 1, n, stdout);
+//            fflush(stdout);
+//        }
+//
+//        llama_batch_clear(&batch);
+//        llama_batch_add(
+//            &batch,
+//            tok,
+//            (llama_pos)cur_pos,
+//            (const int[]) {
+//            0
+//        },
+//            true
+//        );
+//
+//        if (llama_decode(e->ctx, batch) != 0) {
+//            fprintf(stderr, "[engine] decode(next) failed\n");
+//            break;
+//        }
+//
+//        ++n_gen;
+//        ++cur_pos;
+//
+//        if (strstr(out, "\n\n") || strstr(out, "\n"))
+//            break;
+//    }
+//
+//    free(tokens);
+//
+//    // ❌ NO engine_kv_advance(e, 1);
+//    // ❌ NO engine_kv_debug(e);
+//
+//    return (int)out_len;
+//}
+
 int engine_generate(
     engine_t* e,
     const char* prompt,
@@ -546,14 +684,16 @@ int engine_generate(
     out[0] = '\0';
     if (prompt[0] == '\0') return 0;
 
-    // ====================== FAST SETTINGS ======================
-    max_tokens = 16;      // bump later if you want
+    // fast defaults
+    max_tokens = 128;
     temp = 0.7f;
     top_k = 20;
     top_p = 0.9f;
 
-    // ❌ NO engine_kv_clear(e) HERE ANYMORE
-    // Context is already recreated by the caller (chat / summarize).
+    // IMPORTANT:
+    // - DO NOT reset KV here
+    // - DO NOT reset position here
+    // If you want a fresh context, call engine_kv_clear(e) BEFORE this.
 
     // ====================== TOKENIZE ======================
     const int max_prompt_tokens = 4096;
@@ -578,38 +718,36 @@ int engine_generate(
         return -1;
     }
 
-    // ====================== BATCH ======================
+    // ====================== BATCH (PROMPT) ======================
     llama_batch batch = llama_batch_init(1024, 0, 1);
 
-    int64_t cur_pos = 0;  // fresh context → start at 0
+    int64_t cur_pos = e->pos;   // <-- start where we left off
 
-    // Add prompt
     for (int i = 0; i < n_prompt; ++i) {
         llama_batch_add(
             &batch,
             tokens[i],
             (llama_pos)cur_pos,
             (const int[]) {
-            0
-        },          // single sequence
-            i == n_prompt - 1
+            e->seq_id
+        },   // single sequence
+            i == n_prompt - 1             // logits on last prompt token
         );
         cur_pos++;
     }
 
     if (llama_decode(e->ctx, batch) != 0) {
         fprintf(stderr, "[engine] decode(prompt) failed\n");
+        llama_batch_free(batch);
         free(tokens);
         return -1;
     }
-
-    // ❌ NO engine_kv_mark_prompt(e, n_prompt);
 
     // ====================== GENERATION LOOP ======================
     size_t out_len = 0;
     int    n_gen = 0;
 
-    while (n_gen < max_tokens && out_len + 32 < out_size) {
+    while (n_gen < max_tokens && out_len + 8 < out_size) { //32
         llama_token tok = sample_next(e, temp, top_k, top_p);
         if (tok == llama_token_eos(e->model))
             break;
@@ -624,8 +762,14 @@ int engine_generate(
             false
         );
         if (n <= 0) break;
-
         if (out_len + (size_t)n >= out_size) break;
+
+        // ⭐⭐⭐ INSERT THE ROLE‑TAG BLOCKER HERE ⭐⭐⭐
+        if (strstr(buf, "<|") || strstr(buf, "|>")) {
+            // Skip tokens that would corrupt your prompt
+            continue;
+        }
+        // ⭐⭐⭐ END INSERT ⭐⭐⭐
 
         memcpy(out + out_len, buf, n);
         out_len += n;
@@ -640,11 +784,11 @@ int engine_generate(
         llama_batch_add(
             &batch,
             tok,
-            (llama_pos)cur_pos,
+            (llama_pos)cur_pos,          // <-- continue at cur_pos
             (const int[]) {
-            0
+            e->seq_id
         },
-            true
+            true                         // need logits for next token
         );
 
         if (llama_decode(e->ctx, batch) != 0) {
@@ -655,18 +799,20 @@ int engine_generate(
         ++n_gen;
         ++cur_pos;
 
-        if (strstr(out, "\n\n") || strstr(out, "\n"))
-            break;
+        /*if (strstr(out, "\n\n") || strstr(out, "\n"))
+            break;*/
     }
 
+    //vsafe_engine_batch_free(batch);
+
+    ///llama_batch_free(batch);
     free(tokens);
 
-    // ❌ NO engine_kv_advance(e, 1);
-    // ❌ NO engine_kv_debug(e);
+    // persist new position for next call
+    e->pos = cur_pos;
 
     return (int)out_len;
 }
-
 
 
 
@@ -737,84 +883,128 @@ engine_t* engine_open(const char* path) {
 //top_k = 20;
 //top_p = 0.9f;
 
+//int engine_chat(engine_t* e,
+//    const char* user_input,
+//    char* out,
+//    size_t out_size)
+//{
+//    if (!e || !e->model || !e->ctx || !user_input || !out || out_size == 0)
+//        return -1;
+//
+//    // ⭐ ALWAYS RESET KV BEFORE ANY CHAT TURN
+//    // This prevents "X vs Y" KV position mismatch errors.
+//   // engine_kv_clear(e);
+//   // engine_recreate_context(e);
+//
+//    // ============================================================
+//    // DDG SEARCH MODE
+//    // ============================================================
+//    if (strncmp(user_input, "search:", 7) == 0) {
+//        const char* q = user_input + 7;
+//        while (*q == ' ') ++q;
+//
+//        char* argv[1];
+//        argv[0] = (char*)q;
+//
+//        char* ddg_json = plugin_ddg(1, argv);
+//        if (!ddg_json) {
+//            snprintf(out, out_size, "Search failed.");
+//            engine_append_turn(e, "AI", out);
+//            return 0;
+//        }
+//
+//        char prompt[8192];
+//        snprintf(prompt, sizeof(prompt),
+//            "You are a helpful assistant.\n"
+//            "Here is JSON search result data:\n%s\n\n"
+//            "Summarize the most relevant answer for the user.\nAI:",
+//            ddg_json);
+//
+//        int rc = engine_generate(
+//            e,
+//            prompt,
+//            out,
+//            out_size,
+//            64,
+//            0.7f,
+//            20,
+//            0.9f,
+//            true   // ⭐ STREAM
+//        );
+//
+//        //engine_append_turn(e, "AI", out);
+//        return (rc < 0) ? -1 : 0;
+//    }
+//
+//    // ============================================================
+//    // NORMAL CHAT MODE
+//    // ============================================================
+//    char prompt[8192];
+//    engine_build_prompt(e, user_input, prompt, sizeof(prompt));
+//
+//    int rc = engine_generate(
+//        e,
+//        prompt,
+//        out,
+//        out_size,
+//        64,
+//        0.7f,
+//        20,
+//        0.9f,
+//        true   // ⭐ STREAM
+//    );
+//
+//    if (rc < 0) {
+//        fprintf(stderr, "[engine] engine_generate(chat) failed\n");
+//        return -1;
+//    }
+//
+//    engine_append_turn(e, "AI", out);
+//    return 0;
+//}
+
 int engine_chat(engine_t* e,
-    const char* user_input,
+    const char* user_msg,
     char* out,
     size_t out_size)
 {
-    if (!e || !e->model || !e->ctx || !user_input || !out || out_size == 0)
-        return -1;
+    // First turn → reset KV + pos
+    /*if (e->n_turns != 0) {
+        engine_kv_clear(e);
+    }*/
 
-    // ⭐ ALWAYS RESET KV BEFORE ANY CHAT TURN
-    // This prevents "X vs Y" KV position mismatch errors.
-   // engine_kv_clear(e);
-   // engine_recreate_context(e);
+    // Add user turn
+    engine_append_turn(e, "user", user_msg);
 
-    // ============================================================
-    // DDG SEARCH MODE
-    // ============================================================
-    if (strncmp(user_input, "search:", 7) == 0) {
-        const char* q = user_input + 7;
-        while (*q == ' ') ++q;
+    // Build prompt
+    char prompt[65536];
+    engine_build_prompt(e, prompt, sizeof(prompt));
 
-        char* argv[1];
-        argv[0] = (char*)q;
+    // STREAMING OUTPUT
+    printf("AI> ");
+    fflush(stdout);
 
-        char* ddg_json = plugin_ddg(1, argv);
-        if (!ddg_json) {
-            snprintf(out, out_size, "Search failed.");
-            engine_append_turn(e, "AI", out);
-            return 0;
-        }
-
-        char prompt[8192];
-        snprintf(prompt, sizeof(prompt),
-            "You are a helpful assistant.\n"
-            "Here is JSON search result data:\n%s\n\n"
-            "Summarize the most relevant answer for the user.\nAI:",
-            ddg_json);
-
-        int rc = engine_generate(
-            e,
-            prompt,
-            out,
-            out_size,
-            64,
-            0.7f,
-            20,
-            0.9f,
-            true   // ⭐ STREAM
-        );
-
-        engine_append_turn(e, "AI", out);
-        return (rc < 0) ? -1 : 0;
-    }
-
-    // ============================================================
-    // NORMAL CHAT MODE
-    // ============================================================
-    char prompt[8192];
-    engine_build_prompt(e, user_input, prompt, sizeof(prompt));
-
-    int rc = engine_generate(
+    out[0] = 0;
+    int n = engine_generate(
         e,
         prompt,
         out,
         out_size,
-        64,
+        128,
         0.7f,
         20,
         0.9f,
-        true   // ⭐ STREAM
+        true   // tickertape streaming
     );
 
-    if (rc < 0) {
-        fprintf(stderr, "[engine] engine_generate(chat) failed\n");
+    if (n <= 0)
         return -1;
-    }
 
-    engine_append_turn(e, "AI", out);
+    // Save assistant turn
+    sanitize(out);
+    engine_append_turn(e, "assistant", out);
+
+    printf("\n");
     return 0;
 }
-
 

@@ -5,6 +5,7 @@
 #ifdef __cplusplus
 extern "C" {
 #endif
+#define MAX_TURNS 32
 
     typedef struct {
         char role[8];   // "User" / "AI"
@@ -18,10 +19,10 @@ extern "C" {
         int64_t pos;
         //char conversation[16384];
 
-        engine_turn_t turns[128];
+        engine_turn_t turns[MAX_TURNS];
         int n_turns;
         // ⭐ KV subsystem
-        
+        int32_t seq_id;
         bool    kv_valid;      // is there a meaningful sequence in KV?
         int64_t kv_len;        // how many tokens are currently in KV?
 
