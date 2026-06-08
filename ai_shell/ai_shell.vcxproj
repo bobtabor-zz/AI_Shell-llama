@@ -79,6 +79,8 @@
     <ClCompile Include="plugins\ddg.c" />
     <ClCompile Include="plugins\summarize_file.c" />
     <ClCompile Include="plugins\websearch.c" />
+    <ClCompile Include="server\http_server.c" />
+    <ClCompile Include="server\summarize_file_html.c" />
     <ClCompile Include="vmm\vmm.c" />
   </ItemGroup>
   <ItemGroup>
@@ -86,7 +88,12 @@
     <ClInclude Include="engine\engine_kv.h" />
     <ClInclude Include="include\plugin.h" />
     <ClInclude Include="loader\gguf_loader.h" />
+    <ClInclude Include="server\http_server.h" />
     <ClInclude Include="vmm\vmm.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="server\chat.html" />
+    <None Include="server\test.html" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
 </Project>

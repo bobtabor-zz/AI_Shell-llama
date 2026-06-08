@@ -18,10 +18,39 @@ http://127.0.0.1:8081/infer
 
 OPEN_MODEL default C:\Projects\AI_Shell-main\Meta-Llama-3-8B-Instruct.Q4_K_S.gguf
 
+OPEN default C:\Projects\AI_Shell-main\Bob-llama-Q4_K_S.gguf
 OPEN_MODEL default C:\Projects\AI_Shell-main\Bob-llama-Q4_K_S.gguf
 
-
 OPEN default C:\Projects\AI_Shell-main\Bob-llama-Q4_K_S.gguf
+
+
+OPEN default C:\Projects\AI_Shell-main\Bob-llama-Q5_K.gguf
+
+ summarize_file C:\Users\Bobio\source\ai_shell\README.md
+
+
+
+
+plugin ddg who invented the floppy disk
+
+plugin websearch who invented the floppy disk
+
+plugin summarize_file "C:\\Users\\Bobio\\source\\ai_shell\\README.md"
+
+plugin summarize_file "C:\Users\Bobio\source\ai_shell\README.md"
+
+file:///C:/Users/Bobio/source/ai_shell/server/test.html
+
+file:///C:/Users/Bobio/source/ai_shell/server/chat.html
+
+
+http://localhost:8080/api/generate
+
+
+curl -X POST http://localhost:8080/api/plugin ^ -H "Content-Type: application/json" ^ -d "{\"plugin\":\"ddg\", \"query\":\"hello\"}"
+     
+     
+summarize_file \"C:\\\\Users\\\\Bobio\\\\source\\\\ai_shell\\\\README.md\"
 
 
 ..\llama.cpp\ggml\include
@@ -35,6 +64,8 @@ llama_cli_remote.exe -m default -p "Houston is" --n-predict 64
 
 
 C:\\projects\\\AI_Shell-main\\Meta-Llama-3-8B-Instruct.Q4_K_S.gguf
+
+
 C:\projects\AI_Shell-main
 
 

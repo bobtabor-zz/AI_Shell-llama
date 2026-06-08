@@ -12,6 +12,10 @@ extern "C" {
         char text[4096];
     } engine_turn_t;
 
+    typedef struct {
+        char role[8];   // "User" / "AI"
+        char text[4096];
+    } html_turn_t;
 
     typedef struct engine {
         struct llama_model* model;
@@ -19,8 +23,13 @@ extern "C" {
         int64_t pos;
         //char conversation[16384];
 
+        html_turn_t html_turns[128];
+        int html_n_turns;
+
+
         engine_turn_t turns[MAX_TURNS];
         int n_turns;
+
         // ⭐ KV subsystem
         int32_t seq_id;
         bool    kv_valid;      // is there a meaningful sequence in KV?
@@ -34,6 +43,11 @@ extern "C" {
         const char* user_input,
         char* out,
         size_t out_size);
+
+   int engine_chat_html(engine_t* e,
+       const char* user_input,
+       char* out,
+       size_t out_size);
 
     /*void engine_kv_cache_clear(engine_t* e);*/
 

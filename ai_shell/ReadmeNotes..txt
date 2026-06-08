@@ -130,16 +130,21 @@ C:\Users\btabor\source\
     	engine\
         	engine.c
         	engine.h
+		engine_kv.c
+        	engine_kv.h
     	loader\
         	gguf_loader.c
         	gguf_loader.h
     	vmm\
         	vmm.c
         	vmm.h
-
-
-
-
-
+	core\
+        	plugin.c
+ 	include\
+	  	plugin.h
+	plugins\
+        	ddg.c
+        	summariz_file.c
+        	websearch.c
 
 

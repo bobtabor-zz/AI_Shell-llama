@@ -1,10 +1,12 @@
 #include "../engine/engine.h"
 #include "llama.h"
+#include <windows.h>
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include "../include/plugin.h"
+#include "../server/http_server.h"
 
 // -----------------------------------------------------------------------------
 // Global engine instance
@@ -142,6 +144,8 @@ static void cmd_stats(int argc, char ** argv) {
 // Command dispatcher
 // -----------------------------------------------------------------------------
 
+
+
 static void dispatch(char* line) {
     trim(line);
     if (line[0] == 0) {
@@ -213,8 +217,7 @@ static void dispatch(char* line) {
         cmd_stats(argc, argv);
 
     }
-
-    else if (strcmp(cmd, "PLUGIN") == 0) {
+   /* else if (strcmp(cmd, "PLUGIN") == 0) {
 
         if (argc < 3) {
             printf("usage: plugin <name> <args...>\n");
@@ -236,12 +239,122 @@ static void dispatch(char* line) {
         if (result)
             printf("%s\n", result);
     }
-    
+
     else {
         printf("ERR unknown_command\n");
+    }*/
+    //else if (strcmp(cmd, "PLUGIN") == 0) {
+
+    //    if (argc < 3) {
+    //        printf("usage: plugin <name> <args...>\n");
+    //        return;
+    //    }
+
+    //    const char* plugin_name = argv[1];
+
+    //    plugin_fn fn = plugin_lookup(plugin_name);
+    //    if (!fn) {
+    //        printf("ERR unknown_plugin\n");
+    //        return;
+    //    }
+
+    //    // Build JSON: { "plugin": "<name>", "query": "<args...>" }
+    //    char json[4096];
+    //    snprintf(json, sizeof(json),
+    //        "{ \"plugin\": \"%s\", \"query\": \"",
+    //        plugin_name
+    //    );
+
+    //    for (int i = 2; i < argc; i++) {
+    //        strncat(json, argv[i], sizeof(json) - strlen(json) - 1);
+    //        if (i + 1 < argc)
+    //            strncat(json, " ", sizeof(json) - strlen(json) - 1);
+    //    }
+
+    //    strncat(json, "\" }", sizeof(json) - strlen(json) - 1);
+
+    //    char* result = fn(json);
+    //    if (result) {
+    //        printf("%s\n", result);
+    //        free(result);
+    //    }
+    //}
+
+
+
+
+
+
+    //else if (strcmp(cmd, "PLUGIN") == 0) {
+
+    //    if (argc < 3) {
+    //        printf("usage: plugin <name> <args...>\n");
+    //        return;
+    //    }
+
+    //    const char* plugin_name = argv[1];
+
+    //    plugin_fn fn = plugin_lookup(plugin_name);
+    //    if (!fn) {
+    //        printf("ERR unknown_plugin\n");
+    //        return;
+    //    }
+
+    //    // Build JSON: { "plugin": "<name>", "query": "<args...>" }
+    //    char json[4096];
+    //    snprintf(json, sizeof(json),
+    //        "{ \"plugin\": \"%s\", \"query\": \"",
+    //        plugin_name
+    //    );
+
+    //    for (int i = 2; i < argc; i++) {
+    //        strncat(json, argv[i], sizeof(json) - strlen(json) - 1);
+    //        if (i + 1 < argc)
+    //            strncat(json, " ", sizeof(json) - strlen(json) - 1);
+    //    }
+
+    //    strncat(json, "\" }", sizeof(json) - strlen(json) - 1);
+
+    //    // Call plugin with JSON input
+    //    char* result = fn(json);
+    //    if (result) {
+    //        printf("%s\n", result);
+    //        free(result);
+    //    }
+    //}
+  else if (strcmp(cmd, "PLUGIN") == 0) {
+
+      if (argc < 3) {
+          printf("usage: plugin <name> <args...>\n");
+          return;
+      }
+
+      const char* plugin_name = argv[1];
+
+      plugin_fn fn = plugin_lookup(plugin_name);
+      if (!fn) {
+          printf("ERR unknown_plugin\n");
+          return;
+      }
+
+      int p_argc = argc - 2;
+      char** p_argv = &argv[2];
+
+      char* result = fn(p_argc, p_argv);
+      if (result)
+          printf("%s\n", result);
+    }
+
+  else {
+      printf("ERR unknown_command\n");
     }
 }
 
+DWORD WINAPI http_server_thread(LPVOID param) {
+    int port = (int)(intptr_t)param;
+    http_server_start(port);
+    return 0;
+}
 
 // -----------------------------------------------------------------------------
 // Main loop
@@ -255,8 +368,25 @@ int main(void) {
 
     // ⭐ REGISTER PLUGINS HERE ⭐
     plugin_register("ddg", plugin_ddg);
-    plugin_register("summarize_file", plugin_summarize_file);
+    plugin_register("summarize_term", plugin_summarize_file);  // need to check
     plugin_register("websearch", plugin_websearch);
+   // plugin_register("ddg_term", plugin_ddg_Term);   
+    plugin_register("summarize_file", plugin_summarize_file_html);
+
+    // ⭐ START HTTP SERVER IN BACKGROUND THREAD ⭐
+    CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)http_server_start, (void*)8080, 0, NULL);
+
+    /*CreateThread(
+        NULL,
+        0,
+        http_server_thread,
+        (LPVOID)(intptr_t)8080,
+        0,
+        NULL
+    );*/
+
+
+    printf("[http] server running on http://localhost:8080\n");
 
     printf("ai> ");
     fflush(stdout);

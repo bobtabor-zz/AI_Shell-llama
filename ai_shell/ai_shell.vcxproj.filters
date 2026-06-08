@@ -26,6 +26,12 @@
     <ClCompile Include="engine\engine_kv.c">
       <Filter>engine</Filter>
     </ClCompile>
+    <ClCompile Include="server\http_server.c">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="server\summarize_file_html.c">
+      <Filter>plugins</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="engine\engine.h">
@@ -42,6 +48,9 @@
     </ClInclude>
     <ClInclude Include="engine\engine_kv.h">
       <Filter>engine</Filter>
+    </ClInclude>
+    <ClInclude Include="server\http_server.h">
+      <Filter>server</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -72,5 +81,12 @@
     <Filter Include="llama">
       <UniqueIdentifier>{092a5475-7f7b-4df9-84a3-cf749edbbefc}</UniqueIdentifier>
     </Filter>
+    <Filter Include="server">
+      <UniqueIdentifier>{fb82302c-ad51-4be4-a1f9-039a7b775a39}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="server\test.html" />
+    <None Include="server\chat.html" />
   </ItemGroup>
 </Project>
