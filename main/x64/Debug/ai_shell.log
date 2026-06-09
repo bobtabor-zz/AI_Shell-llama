@@ -1,0 +1,26 @@
+﻿  engine.c
+C:\Users\Bobio\source\ai_shell\engine\engine.c(31,14): warning C4013: 'vmm_create' undefined; assuming extern returning int
+C:\Users\Bobio\source\ai_shell\engine\engine.c(31,12): warning C4047: '=': 'vmm_t *' differs in levels of indirection from 'int'
+C:\Users\Bobio\source\ai_shell\engine\engine.c(43,20): warning C4996: 'llama_load_model_from_file': use llama_model_load_from_file instead
+C:\Users\Bobio\source\ai_shell\engine\engine.c(53,18): warning C4996: 'llama_new_context_with_model': use llama_init_from_model instead
+C:\Users\Bobio\source\ai_shell\engine\engine.c(56,9): warning C4996: 'llama_free_model': use llama_model_free instead
+C:\Users\Bobio\source\ai_shell\engine\engine.c(74,23): warning C4996: 'llama_free_model': use llama_model_free instead
+C:\Users\Bobio\source\ai_shell\engine\engine.c(160,36): warning C4133: 'function': incompatible types - from 'llama_model *' to 'const llama_vocab *'
+  gguf_loader.c
+  vmm.c
+  ai_shell.c
+C:\Users\Bobio\source\ai_shell\ai_shell\ai_shell.c(77,9): warning C4996: 'strcat': This function or variable may be unsafe. Consider using strcat_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+C:\Users\Bobio\source\ai_shell\ai_shell\ai_shell.c(79,13): warning C4996: 'strcat': This function or variable may be unsafe. Consider using strcat_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+C:\Users\Bobio\source\ai_shell\ai_shell\ai_shell.c(123,24): warning C4996: 'strtok': This function or variable may be unsafe. Consider using strtok_s instead. To disable deprecation, use _CRT_SECURE_NO_WARNINGS. See online help for details.
+  Generating Code...
+engine.obj : error LNK2019: unresolved external symbol llama_model_default_params referenced in function engine_open
+engine.obj : error LNK2019: unresolved external symbol llama_context_default_params referenced in function engine_open
+engine.obj : error LNK2019: unresolved external symbol llama_load_model_from_file referenced in function engine_open
+engine.obj : error LNK2019: unresolved external symbol llama_free_model referenced in function engine_close
+engine.obj : error LNK2019: unresolved external symbol llama_new_context_with_model referenced in function engine_open
+engine.obj : error LNK2019: unresolved external symbol llama_free referenced in function engine_close
+engine.obj : error LNK2019: unresolved external symbol llama_n_vocab referenced in function engine_infer
+engine.obj : error LNK2019: unresolved external symbol llama_model_get_vocab referenced in function engine_infer
+engine.obj : error LNK2019: unresolved external symbol llama_tokenize referenced in function engine_infer
+engine.obj : error LNK2019: unresolved external symbol llama_detokenize referenced in function engine_infer
+C:\Users\Bobio\source\ai_shell\x64\Debug\ai_shell.exe : fatal error LNK1120: 10 unresolved externals
