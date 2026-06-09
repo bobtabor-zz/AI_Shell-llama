@@ -97,6 +97,27 @@ void sanitize(char* s) {
     }
 }
 
+//void engine_reset_context(engine_t* e) {
+//    if (e->ctx) {
+//        llama_free(e->ctx);
+//        e->ctx = NULL;
+//    }
+//
+//    struct llama_context_params params;
+//
+//    params.n_ctx = e->n_ctx;
+//    params.n_parts = -1;
+//    params.seed = 0;
+//    params.f16_kv = 1;
+//    params.logits_all = 0;
+//    params.vocab_only = 0;
+//    params.use_mmap = 1;
+//    params.use_mlock = 0;
+//
+//    e->ctx = llama_init_from_file(e->model_path, params);
+//}
+
+
 
 void engine_append_turn(engine_t* e, const char* role, const char* text) {
     if (e->n_turns >= MAX_TURNS) {
@@ -450,166 +471,376 @@ int engine_generate_html(
     engine_t* e,
     const char* prompt,
     char* out,
-    size_t out_size,
-    int max_tokens,
-    float temp,
-    int top_k,
-    float top_p,
-    bool stream   // MUST be false for HTML
+    size_t      out_size,
+    int         max_tokens,
+    float       temp,
+    int         top_k,
+    float       top_p,
+    bool        stream
 ) {
-    if (!e || !e->model || !e->ctx || !prompt || !out || out_size == 0)
-        return -1;
-
+    if (!e || !e->model || !e->ctx || !prompt || !out || out_size == 0) return -1;
     out[0] = '\0';
-    if (prompt[0] == '\0')
-        return 0;
+    if (prompt[0] == '\0') return 0;
 
-    // HTML defaults
     max_tokens = 128;
     temp = 0.7f;
     top_k = 20;
     top_p = 0.9f;
 
+    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
+
     // ============================================================
-    // TOKENIZE PROMPT
+    // 1. MEASURE IMMUTABLE SYSTEM PROMPT
+    // ============================================================
+    const char* system_str = "<|system|>\nYou are a helpful assistant.\n\n";
+    //llama_token sys_token_buf;
+    llama_token sys_token_buf[128] = { 0 };
+
+    int32_t system_prompt_len = llama_tokenize(
+        vocab,
+        system_str,
+        (int32_t)strlen(system_str),
+        sys_token_buf, // Now safely passes the address of our 128-slot array
+        128,
+        true,
+        false
+    );
+
+    if (system_prompt_len <= 0) return -1;
+
+    // ============================================================
+    // 2. DISCARD HISTORICAL LAYERS FROM CONTEXT CACHE
+    // ============================================================
+    struct llama_memory* mem = llama_get_memory(e->ctx);
+    if (mem) {
+        llama_memory_seq_rm(mem, e->seq_id, system_prompt_len, INT32_MAX);
+    }
+
+    // ============================================================
+    // 3. PARSE FULL COMBINED PROMPT STRING
     // ============================================================
     const int max_prompt_tokens = 4096;
     llama_token* tokens = malloc(max_prompt_tokens * sizeof(llama_token));
-    if (!tokens)
-        return -1;
-
-    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
+    if (!tokens) return -1;
 
     int n_prompt = llama_tokenize(
-        vocab,
-        prompt,
-        (int32_t)strlen(prompt),
-        tokens,
-        max_prompt_tokens,
-        true,   // add BOS
-        false   // no special tokens
+        vocab, prompt, (int32_t)strlen(prompt),
+        tokens, max_prompt_tokens,
+        true,
+        false
     );
-
     if (n_prompt <= 0) {
         free(tokens);
         return -1;
     }
 
-    // ============================================================
-    // BATCH INIT
-    // ============================================================
-    llama_batch batch = llama_batch_init(1024, 0, 1);
-
-    int64_t cur_pos = e->pos;   // HTML chat resets pos before calling this
-
-    // ============================================================
-    // FEED PROMPT TOKENS
-    // ============================================================
-    for (int i = 0; i < n_prompt; ++i) {
-        llama_batch_add(
-            &batch,
-            tokens[i],
-            (llama_pos)cur_pos,
-            (const int[]) {
-            e->seq_id
-        },   // ⭐ correct KV namespace
-            i == n_prompt - 1             // logits on last prompt token
-        );
-        cur_pos++;
+    if (n_prompt < system_prompt_len) {
+        system_prompt_len = 0;
     }
 
-   //struct llama_kv_cache_seq_rm(e->ctx, -1, -1, -1);
-    engine_kv_clear(e->ctx);
+    int32_t tokens_to_add = n_prompt - system_prompt_len;
 
-    if (llama_decode(e->ctx, batch) != 0) {
-        //llama_batch_free(batch);
-        free(tokens);
+    // ============================================================
+    // 4. PROMPT EVALUATION PHASE
+    // ============================================================
+    int decode_rc = 0;
+    int64_t cur_pos = system_prompt_len;
+
+    if (tokens_to_add > 0) {
+        // VLA (Variable Length Arrays) to store data directly on the stack framework
+        // This is pure, native standard C memory.
+        llama_pos      prompt_pos[4096];
+        int32_t        prompt_n_seq[4096];
+        llama_seq_id   prompt_seq_ids[4096];
+        llama_seq_id* prompt_seq_ptrs[4096];
+        int8_t         prompt_logits[4096];
+
+        // Safety cap bounds validation to strictly avoid stack overflow exceptions
+        int32_t tokens_to_process = (tokens_to_add > 4096) ? 4096 : tokens_to_add;
+
+        struct llama_batch prompt_batch;
+        prompt_batch.n_tokens = 0;
+        prompt_batch.token = &tokens[system_prompt_len]; // Point directly to slice offset
+        prompt_batch.embd = NULL;
+        prompt_batch.pos = prompt_pos;
+        prompt_batch.n_seq_id = prompt_n_seq;
+        prompt_batch.seq_id = prompt_seq_ptrs;
+        prompt_batch.logits = prompt_logits;
+
+        for (int i = 0; i < tokens_to_process; ++i) {
+            // Bind pointer trackers manually to bypass structural llama_batch_add constraints
+            prompt_pos[i] = (llama_pos)cur_pos;
+            prompt_n_seq[i] = 1;
+            prompt_seq_ids[i] = e->seq_id;
+            prompt_seq_ptrs[i] = &prompt_seq_ids[i]; // Cross link sequence mappings
+            prompt_logits[i] = (i == tokens_to_process - 1) ? 1 : 0; // Logits on tail token only
+
+            prompt_batch.n_tokens++;
+            cur_pos++;
+        }
+
+        if (prompt_batch.n_tokens > 0) {
+            decode_rc = llama_decode(e->ctx, prompt_batch);
+        }
+
+        // NO MORE llama_batch_free(prompt_batch); NEEDED!
+        // The arrays are on the stack and clear instantly when this block closes.
+    }
+
+    free(tokens); // Done with raw token strings
+
+    if (decode_rc != 0) {
         return -1;
     }
 
+    e->pos = cur_pos;
+
     // ============================================================
-    // GENERATION LOOP (patched, no infinite loops)
-    // ============================================================
+// 5. GENERATION / SAMPLING LOOP (PURE STACK C REUSE)
+// ============================================================
     size_t out_len = 0;
     int n_gen = 0;
 
     while (n_gen < max_tokens && out_len + 8 < out_size) {
-
         llama_token tok = sample_next(e, temp, top_k, top_p);
 
         // Stop on EOS
-        if (tok == llama_token_eos(e->model))
-            break;
+        if (tok == llama_token_eos(e->model)) break;
 
         // Convert token to text
         char buf[128] = { 0 };
-        int n = llama_token_to_piece(
-            vocab,
-            tok,
-            buf,
-            sizeof(buf),
-            0,
-            false
-        );
+        int n = llama_token_to_piece(vocab, tok, buf, sizeof(buf), 0, false);
+        if (n <= 0) break;
 
-        if (n <= 0)
-            break;
-
-        // ============================================================
-        // BLOCK ONLY EXACT ROLE TAG TOKENS — NOT SUBSTRINGS
-        // ============================================================
+        // BLOCK ONLY EXACT ROLE TAG TOKENS
         bool skip_output = false;
-
-        if (strcmp(buf, "<|assistant|>") == 0 ||
-            strcmp(buf, "<|user|>") == 0 ||
-            strcmp(buf, "<|system|>") == 0 ||
-            strcmp(buf, "assistant") == 0 ||
-            strcmp(buf, "/assistant") == 0)
-        {
+        if (strcmp(buf, "<|assistant|>") == 0 || strcmp(buf, "<|user|>") == 0 ||
+            strcmp(buf, "<|system|>") == 0 || strcmp(buf, "assistant") == 0 ||
+            strcmp(buf, "/assistant") == 0) {
             skip_output = true;
         }
 
-        // ============================================================
         // APPEND OUTPUT (ONLY IF NOT SKIPPED)
-        // ============================================================
         if (!skip_output) {
-            if (out_len + (size_t)n >= out_size)
-                break;
-
+            if (out_len + (size_t)n >= out_size) break;
             memcpy(out + out_len, buf, n);
             out_len += n;
             out[out_len] = '\0';
         }
 
         // ============================================================
-        // ALWAYS ADVANCE THE MODEL — EVEN IF SKIPPED
+        // FIX: LINE-BY-LINE MSVC C ASSIGNMENT (NO COMPOUND LITERALS)
         // ============================================================
-        llama_batch_clear(&batch);
-        llama_batch_add(
-            &batch,
-            tok,
-            (llama_pos)cur_pos,
-            (const int[]) {
-            e->seq_id
-        },   // same KV namespace
-            true
-        );
+        // Declare backing arrays explicitly on the thread stack
+        llama_pos      stack_pos = (llama_pos)cur_pos;
+        int32_t        stack_n_seq = 1;
+        llama_seq_id   stack_seq_id = e->seq_id;
+        llama_seq_id* stack_seq_ptr = &stack_seq_id;
+        int8_t         stack_output = 1; // 1 means generate logits for this token
 
-        if (llama_decode(e->ctx, batch) != 0)
-            break;
+        // Allocate a blank struct on the stack
+        struct llama_batch loop_batch;
+
+        // Populate fields line-by-line to comply with MSVC's standard C engine
+        loop_batch.n_tokens = 1;
+        loop_batch.token = &tok;
+        loop_batch.embd = NULL;
+        loop_batch.pos = &stack_pos;
+        loop_batch.n_seq_id = &stack_n_seq;
+        loop_batch.seq_id = &stack_seq_ptr;
+
+        //  UNCOMMENTED AND MAPPED TO NATIVE FIELD NAME:
+        loop_batch.logits = &stack_output;
+
+        // Pass the stack-allocated structure directly to decode
+        if (llama_decode(e->ctx, loop_batch) != 0) {
+            break; // Exit if context length is exceeded or desynced
+        }
 
         ++n_gen;
         ++cur_pos;
     }
 
-
-    free(tokens);
-
-    // Persist new position
+    // Persist final position pointer safely back into state engine
     e->pos = cur_pos;
 
     return (int)out_len;
 }
+
+
+
+
+//
+//// ===================================================================
+//// Generate html
+//// ===================================================================
+//int engine_generate_html(
+//    engine_t* e,
+//    const char* prompt,
+//    char* out,
+//    size_t out_size,
+//    int max_tokens,
+//    float temp,
+//    int top_k,
+//    float top_p,
+//    bool stream   // MUST be false for HTML
+//) {
+//    if (!e || !e->model || !e->ctx || !prompt || !out || out_size == 0)
+//        return -1;
+//
+//    out[0] = '\0';
+//    if (prompt[0] == '\0')
+//        return 0;
+//
+//    // HTML defaults
+//    max_tokens = 128;
+//    temp = 0.7f;
+//    top_k = 20;
+//    top_p = 0.9f;
+//
+//    // ============================================================
+//    // TOKENIZE PROMPT
+//    // ============================================================
+//    const int max_prompt_tokens = 4096;
+//    llama_token* tokens = malloc(max_prompt_tokens * sizeof(llama_token));
+//    if (!tokens)
+//        return -1;
+//
+//    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
+//
+//    int n_prompt = llama_tokenize(
+//        vocab,
+//        prompt,
+//        (int32_t)strlen(prompt),
+//        tokens,
+//        max_prompt_tokens,
+//        true,   // add BOS
+//        false   // no special tokens
+//    );
+//
+//    if (n_prompt <= 0) {
+//        free(tokens);
+//        return -1;
+//    }
+//
+//    // ============================================================
+//    // BATCH INIT
+//    // ============================================================
+//    llama_batch batch = llama_batch_init(1024, 0, 1);
+//
+//    int64_t cur_pos = e->pos;   // HTML chat resets pos before calling this
+//
+//    // ============================================================
+//    // FEED PROMPT TOKENS
+//    // ============================================================
+//    for (int i = 0; i < n_prompt; ++i) {
+//        llama_batch_add(
+//            &batch,
+//            tokens[i],
+//            (llama_pos)cur_pos,
+//            (const int[]) {
+//            e->seq_id
+//        },   // ⭐ correct KV namespace
+//            i == n_prompt - 1             // logits on last prompt token
+//        );
+//        cur_pos++;
+//    }
+//    ///////////////////////////////////////////////////////////////
+//   //struct llama_kv_cache_seq_rm(e->ctx, -1, -1, -1);
+//   // engine_kv_clear(e->ctx);
+//
+//    //////////////////////////////////////////////////
+//
+//    if (llama_decode(e->ctx, batch) != 0) {
+//        //llama_batch_free(batch);
+//        free(tokens);
+//        return -1;
+//    }
+//
+//    // ============================================================
+//    // GENERATION LOOP (patched, no infinite loops)
+//    // ============================================================
+//    size_t out_len = 0;
+//    int n_gen = 0;
+//
+//    while (n_gen < max_tokens && out_len + 8 < out_size) {
+//
+//        llama_token tok = sample_next(e, temp, top_k, top_p);
+//
+//        // Stop on EOS
+//        if (tok == llama_token_eos(e->model))
+//            break;
+//
+//        // Convert token to text
+//        char buf[128] = { 0 };
+//        int n = llama_token_to_piece(
+//            vocab,
+//            tok,
+//            buf,
+//            sizeof(buf),
+//            0,
+//            false
+//        );
+//
+//        if (n <= 0)
+//            break;
+//
+//        // ============================================================
+//        // BLOCK ONLY EXACT ROLE TAG TOKENS — NOT SUBSTRINGS
+//        // ============================================================
+//        bool skip_output = false;
+//
+//        if (strcmp(buf, "<|assistant|>") == 0 ||
+//            strcmp(buf, "<|user|>") == 0 ||
+//            strcmp(buf, "<|system|>") == 0 ||
+//            strcmp(buf, "assistant") == 0 ||
+//            strcmp(buf, "/assistant") == 0)
+//        {
+//            skip_output = true;
+//        }
+//
+//        // ============================================================
+//        // APPEND OUTPUT (ONLY IF NOT SKIPPED)
+//        // ============================================================
+//        if (!skip_output) {
+//            if (out_len + (size_t)n >= out_size)
+//                break;
+//
+//            memcpy(out + out_len, buf, n);
+//            out_len += n;
+//            out[out_len] = '\0';
+//        }
+//
+//        // ============================================================
+//        // ALWAYS ADVANCE THE MODEL — EVEN IF SKIPPED
+//        // ============================================================
+//        llama_batch_clear(&batch);
+//        llama_batch_add(
+//            &batch,
+//            tok,
+//            (llama_pos)cur_pos,
+//            (const int[]) {
+//            e->seq_id
+//        },   // same KV namespace
+//            true
+//        );
+//
+//        if (llama_decode(e->ctx, batch) != 0)
+//            break;
+//
+//        ++n_gen;
+//        ++cur_pos;
+//    }
+//
+//
+//    free(tokens);
+//
+//    // Persist new position
+//    e->pos = cur_pos;
+//
+//    return (int)out_len;
+//}
+
 
 
 // ===================================================================
