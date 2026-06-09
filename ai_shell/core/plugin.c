@@ -1,4 +1,5 @@
 #include <string.h>
+#include <string.h>
 #include "../include/plugin.h"
 
 #define MAX_PLUGINS 64
@@ -27,4 +28,3 @@ plugin_fn plugin_lookup(const char* name) {
     }
     return NULL;
 }
-

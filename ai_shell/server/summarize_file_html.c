@@ -1,4 +1,4 @@
-// summarize_file.c — LLM-powered file summarizer using engine_generate correctly
+// summarize_file_html.c — LLM-powered file summarizer using engine_generate correctly
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -9,7 +9,7 @@
 extern engine_t* g_engine;
 
 // ---------- file reading ----------
-static char* read_file(const char* path, size_t* out_size) {
+static char* read_file_html(const char* path, size_t* out_size) {
     FILE* f = fopen(path, "rb");
     if (!f) return NULL;
 
@@ -61,8 +61,8 @@ static void json_escape(char* dst, size_t dst_sz, const char* src) {
     dst[di] = 0;
 }
 
- ////////---------- LLM helpers ----------///////
-static char* call_llm_summary(const char* prompt) {
+////////---------- LLM helpers ----------///////
+static char* call_llm_summary_html(const char* prompt) {
     if (!g_engine)
         return _strdup("no engine loaded");
 
@@ -70,7 +70,7 @@ static char* call_llm_summary(const char* prompt) {
 
     // You already override max_tokens/temp/top_k/top_p inside engine_generate,
     // so these values are mostly placeholders.
-    int rc = engine_generate(
+    int rc = engine_generate_html(
         g_engine,
         prompt,
         out,
@@ -89,7 +89,7 @@ static char* call_llm_summary(const char* prompt) {
 }
 
 
-static char* summarize_chunk(const char* text) {
+static char* summarize_chunk_html(const char* text) {
     // HARD LIMIT: only embed 600 chars of the chunk into the prompt
     const size_t MAX_EMBED = 600;
     char clipped[700];
@@ -105,12 +105,12 @@ static char* summarize_chunk(const char* text) {
         "Summary:",
         clipped);
 
-    return call_llm_summary(prompt);
+    return call_llm_summary_html(prompt);
 }
 
 
 
-static char* merge_summaries(const char** parts, int count) {
+static char* merge_summaries_html(const char** parts, int count) {
     const int MAX_PARTS = 12;
     if (count > MAX_PARTS) count = MAX_PARTS;
 
@@ -138,7 +138,7 @@ static char* merge_summaries(const char** parts, int count) {
     // ⭐ STREAMING FINAL SUMMARY
     char out[4096] = { 0 };
 
-    engine_generate(
+    engine_generate_html(
         g_engine,
         prompt,
         out,
@@ -156,7 +156,7 @@ static char* merge_summaries(const char** parts, int count) {
 
 
 // ---------- main plugin ----------
-char* plugin_summarize_file(int argc, char** argv) {
+char* plugin_summarize_file_html(int argc, char** argv) {
     if (argc < 1)
         return _strdup("{\"error\":\"missing file path\"}");
 
@@ -166,9 +166,9 @@ char* plugin_summarize_file(int argc, char** argv) {
     const char* path = argv[0];
     size_t size = 0;
 
-    char* contents = read_file(path, &size);
+    char* contents = read_file_html(path, &size);    
     if (!contents)
-        return _strdup("{\"error\":\"cannot_read_file\"}");
+        return _strdup("{\"error\":\"cannot_read_file\"}"); 
 
     const size_t CHUNK = 1024;
     int chunk_count = (int)((size + CHUNK - 1) / CHUNK);
@@ -205,7 +205,7 @@ char* plugin_summarize_file(int argc, char** argv) {
         memcpy(chunk, contents + start, len);
         chunk[len] = 0;
 
-        partial_summaries[i] = summarize_chunk(chunk);
+        partial_summaries[i] = summarize_chunk_html(chunk);
         free(chunk);
 
         if (!partial_summaries[i])
@@ -220,7 +220,7 @@ char* plugin_summarize_file(int argc, char** argv) {
         partial_summaries[0] = NULL;
     }
     else {
-        final_summary = merge_summaries((const char**)partial_summaries, chunk_count);
+        final_summary = merge_summaries_html((const char**)partial_summaries, chunk_count);
     }
 
     for (int i = 0; i < chunk_count; i++)

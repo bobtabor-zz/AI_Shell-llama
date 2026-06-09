@@ -11,5 +11,7 @@ plugin_fn plugin_lookup(const char* name);
 char* plugin_ddg(int argc, char** argv);
 char* plugin_summarize_file(int argc, char** argv);
 char* plugin_websearch(int argc, char** argv);
+char* plugin_summarize_file_html(int argc, char** argv);
+
 
 #endif
