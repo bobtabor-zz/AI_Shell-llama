@@ -213,45 +213,47 @@ void engine_append_turn_html(engine_t* e, const char* role, const char* text) {
 //    strcat(out, "<|assistant|>\n");
 //}
 
-void engine_build_prompt_html(engine_t* e, char* out, size_t out_sz) {
+void engine_build_prompt_html(engine_t* e, char* out, size_t out_sz)
+{
     if (!out || out_sz == 0) return;
-
-    // FULL CLEAR — required
     memset(out, 0, out_sz);
 
-    // Safe append helper
-#define SAFE_CAT(dst, src) \
-        do { \
-            if ((src) && (src)[0]) { \
-                strncat((dst), (src), (out_sz) - strlen(dst) - 1); \
-            } \
-        } while (0)
+    // Prepare messages
+    struct llama_chat_message messages[64];
+    int n_messages = 0;
 
-    SAFE_CAT(out, "<|system|>\nYou are a helpful assistant.\n\n");
+    // System message
+    messages[n_messages].role = "system";
+    messages[n_messages].content = "You are a helpful, friendly assistant. "
+        "Respond naturally in plain text. "
+        "Never output links, references, or long unrelated text unless asked.";
+    n_messages++;
 
-    int n = e->html_n_turns;
-    if (n < 0) n = 0;
-    if (n > MAX_TURNS) n = MAX_TURNS;
-
-    for (int i = 0; i < n; i++) {
+    // Add conversation history
+    for (int i = 0; i < e->html_n_turns && n_messages < 60; i++) {
         html_turn_t* t = &e->html_turns[i];
+        if (!t->role[0] || !t->text[0]) continue;
 
-        // Validate role/text
-        if (!t->role[0] || !t->text[0])
-            continue;
-
-        SAFE_CAT(out, "<|");
-        SAFE_CAT(out, t->role);
-        SAFE_CAT(out, "|>\n");
-        SAFE_CAT(out, t->text);
-        SAFE_CAT(out, "\n\n");
+        messages[n_messages].role = t->role;
+        messages[n_messages].content = t->text;
+        n_messages++;
     }
 
-    SAFE_CAT(out, "<|assistant|>\n");
+    // Apply Llama 3.1 template (correct signature)
+    int32_t ret = llama_chat_apply_template(
+        NULL,                          // tmpl = NULL → use model's default template
+        messages,
+        n_messages,
+        true,                          // add_generation_prompt = true
+        out,
+        (int32_t)out_sz
+    );
 
-#undef SAFE_CAT
+    if (ret < 0) {
+        // Fallback if template fails
+        strncpy(out, "<|begin_of_text|><|start_header_id|>assistant<|end_header_id|>\n", out_sz - 1);
+    }
 }
-
 
 
 static bool engine_has_gpu(void) {
@@ -462,210 +464,514 @@ int engine_generate(
     return (int)out_len;
 }
 
+// Reset the context / KV cache
+//void engine_reset_context(engine_t* e)
+//{
+//    if (!e || !e->ctx) return;
+//
+//    struct llama_memory* mem = llama_get_memory(e->ctx);
+//    if (mem) {
+//        llama_memory_clear(mem, true);        // Current recommended way (2026)
+//    }
+//
+//    // Also reset your custom tracking variables
+//    e->pos = 0;
+//    // e->seq_id = 0;     // Uncomment only if you want to reset sequence ID too
+//}
 
+// Reset the context / KV cache - Best for Llama 3.1
 
-// ===================================================================
-// Generate html
-// ===================================================================
+// Reset the context / KV cache - Compatible with latest llama.cpp (June 2026)
+// Best version right now
+void engine_reset_context(engine_t* e)
+{
+    if (!e || !e->ctx) return;
+
+    struct llama_memory* mem = llama_get_memory(e->ctx);
+    if (mem) {
+        llama_memory_clear(mem, true);
+    }
+
+    e->pos = 0;
+    // Do NOT let seq_id grow forever
+    e->seq_id = 0;        // ← Reset to 0 every time (safest)
+}
+
+#pragma message("CHECKING LLAMA API...")
+
+#ifdef LLAMA_CONTEXT_PARAMS
+#pragma message("HAS LLAMA_CONTEXT_PARAMS")
+#else
+#pragma message("NO LLAMA_CONTEXT_PARAMS")
+#endif
+
 int engine_generate_html(
     engine_t* e,
     const char* prompt,
     char* out,
-    size_t      out_size,
-    int         max_tokens,
-    float       temp,
-    int         top_k,
-    float       top_p,
-    bool        stream
-) {
+    size_t out_size,
+    int max_tokens,
+    float temp,
+    int top_k,
+    float top_p,
+    bool stream)
+{
     if (!e || !e->model || !e->ctx || !prompt || !out || out_size == 0) return -1;
     out[0] = '\0';
     if (prompt[0] == '\0') return 0;
 
-    max_tokens = 128;
-    temp = 0.7f;
-    top_k = 20;
-    top_p = 0.9f;
+    max_tokens = 512;   // better default
 
     const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
 
-    // ============================================================
-    // 1. MEASURE IMMUTABLE SYSTEM PROMPT
-    // ============================================================
-    const char* system_str = "<|system|>\nYou are a helpful assistant.\n\n";
-    //llama_token sys_token_buf;
-    llama_token sys_token_buf[128] = { 0 };
+    // 1. Tokenize
+       
+    // 2. Full reset before every prompt
+    engine_reset_context(e);
+    e->pos = 0;
+    e->seq_id++;                     // increment every new message
 
-    int32_t system_prompt_len = llama_tokenize(
-        vocab,
-        system_str,
-        (int32_t)strlen(system_str),
-        sys_token_buf, // Now safely passes the address of our 128-slot array
-        128,
-        true,
-        false
-    );
-
-    if (system_prompt_len <= 0) return -1;
-
-    // ============================================================
-    // 2. DISCARD HISTORICAL LAYERS FROM CONTEXT CACHE
-    // ============================================================
-    struct llama_memory* mem = llama_get_memory(e->ctx);
-    if (mem) {
-        llama_memory_seq_rm(mem, e->seq_id, system_prompt_len, INT32_MAX);
-    }
-
-    // ============================================================
-    // 3. PARSE FULL COMBINED PROMPT STRING
-    // ============================================================
+    // 3. Tokenize
     const int max_prompt_tokens = 4096;
     llama_token* tokens = malloc(max_prompt_tokens * sizeof(llama_token));
     if (!tokens) return -1;
 
-    int n_prompt = llama_tokenize(
-        vocab, prompt, (int32_t)strlen(prompt),
-        tokens, max_prompt_tokens,
-        true,
-        false
-    );
+    int n_prompt = llama_tokenize(vocab, prompt, (int32_t)strlen(prompt),
+        tokens, max_prompt_tokens, true, false);
+
     if (n_prompt <= 0) {
         free(tokens);
         return -1;
     }
 
-    if (n_prompt < system_prompt_len) {
-        system_prompt_len = 0;
+    // 4. Create and fill batch (correct modern way)
+    struct llama_batch batch = llama_batch_init(n_prompt, 0, 1);  // n_seq_max = 1
+
+    for (int i = 0; i < n_prompt; i++) {
+        batch.token[i] = tokens[i];
+        batch.pos[i] = i;                    // absolute position
+        batch.n_seq_id[i] = 1;
+        //batch.seq_id[i][0] = e->seq_id;            // ← This was the main crash source
+        batch.seq_id[i][0] = 0;           // ← Always use 0 for simple chat
+        batch.logits[i] = (i == n_prompt - 1) ? 1 : 0;
     }
+    batch.n_tokens = n_prompt;
 
-    int32_t tokens_to_add = n_prompt - system_prompt_len;
-
-    // ============================================================
-    // 4. PROMPT EVALUATION PHASE
-    // ============================================================
-    int decode_rc = 0;
-    int64_t cur_pos = system_prompt_len;
-
-    if (tokens_to_add > 0) {
-        // VLA (Variable Length Arrays) to store data directly on the stack framework
-        // This is pure, native standard C memory.
-        llama_pos      prompt_pos[4096];
-        int32_t        prompt_n_seq[4096];
-        llama_seq_id   prompt_seq_ids[4096];
-        llama_seq_id* prompt_seq_ptrs[4096];
-        int8_t         prompt_logits[4096];
-
-        // Safety cap bounds validation to strictly avoid stack overflow exceptions
-        int32_t tokens_to_process = (tokens_to_add > 4096) ? 4096 : tokens_to_add;
-
-        struct llama_batch prompt_batch;
-        prompt_batch.n_tokens = 0;
-        prompt_batch.token = &tokens[system_prompt_len]; // Point directly to slice offset
-        prompt_batch.embd = NULL;
-        prompt_batch.pos = prompt_pos;
-        prompt_batch.n_seq_id = prompt_n_seq;
-        prompt_batch.seq_id = prompt_seq_ptrs;
-        prompt_batch.logits = prompt_logits;
-
-        for (int i = 0; i < tokens_to_process; ++i) {
-            // Bind pointer trackers manually to bypass structural llama_batch_add constraints
-            prompt_pos[i] = (llama_pos)cur_pos;
-            prompt_n_seq[i] = 1;
-            prompt_seq_ids[i] = e->seq_id;
-            prompt_seq_ptrs[i] = &prompt_seq_ids[i]; // Cross link sequence mappings
-            prompt_logits[i] = (i == tokens_to_process - 1) ? 1 : 0; // Logits on tail token only
-
-            prompt_batch.n_tokens++;
-            cur_pos++;
-        }
-
-        if (prompt_batch.n_tokens > 0) {
-            decode_rc = llama_decode(e->ctx, prompt_batch);
-        }
-
-        // NO MORE llama_batch_free(prompt_batch); NEEDED!
-        // The arrays are on the stack and clear instantly when this block closes.
-    }
-
-    free(tokens); // Done with raw token strings
-
-    if (decode_rc != 0) {
+    // Decode prompt
+    if (llama_decode(e->ctx, batch) != 0) {
+        printf("ERROR: llama_decode failed on prompt (n_tokens=%d)\n", n_prompt);
+        llama_batch_free(batch);
+        free(tokens);
         return -1;
     }
 
-    e->pos = cur_pos;
+    llama_batch_free(batch);
+    free(tokens);
 
-    // ============================================================
-// 5. GENERATION / SAMPLING LOOP (PURE STACK C REUSE)
-// ============================================================
+    e->pos = n_prompt;
+
+    // 5. Generation
     size_t out_len = 0;
     int n_gen = 0;
 
-    while (n_gen < max_tokens && out_len + 8 < out_size) {
+    while (n_gen < max_tokens && out_len + 32 < out_size) {
         llama_token tok = sample_next(e, temp, top_k, top_p);
 
-        // Stop on EOS
-        if (tok == llama_token_eos(e->model)) break;
+        if (tok == llama_token_eos(e->model) || tok < 0)
+            break;
 
-        // Convert token to text
-        char buf[128] = { 0 };
+        char buf[256] = { 0 };
         int n = llama_token_to_piece(vocab, tok, buf, sizeof(buf), 0, false);
         if (n <= 0) break;
 
-        // BLOCK ONLY EXACT ROLE TAG TOKENS
-        bool skip_output = false;
-        if (strcmp(buf, "<|assistant|>") == 0 || strcmp(buf, "<|user|>") == 0 ||
-            strcmp(buf, "<|system|>") == 0 || strcmp(buf, "assistant") == 0 ||
-            strcmp(buf, "/assistant") == 0) {
-            skip_output = true;
+        // Append text (skip special tokens)
+        if (n > 0 && !strstr(buf, "<|") && !strchr(buf, '|')) {
+            if (out_len + (size_t)n < out_size) {
+                memcpy(out + out_len, buf, n);
+                out_len += n;
+                out[out_len] = '\0';
+            }
         }
 
-        // APPEND OUTPUT (ONLY IF NOT SKIPPED)
-        if (!skip_output) {
-            if (out_len + (size_t)n >= out_size) break;
-            memcpy(out + out_len, buf, n);
-            out_len += n;
-            out[out_len] = '\0';
-        }
+        // === CORRECT SINGLE TOKEN BATCH ===
+        llama_pos      pos = e->pos;
+        int32_t        n_seq = 1;
+        llama_seq_id   seq_id = e->seq_id;
+        llama_seq_id* seq_ptr = &seq_id;           // ← Important
 
-        // ============================================================
-        // FIX: LINE-BY-LINE MSVC C ASSIGNMENT (NO COMPOUND LITERALS)
-        // ============================================================
-        // Declare backing arrays explicitly on the thread stack
-        llama_pos      stack_pos = (llama_pos)cur_pos;
-        int32_t        stack_n_seq = 1;
-        llama_seq_id   stack_seq_id = e->seq_id;
-        llama_seq_id* stack_seq_ptr = &stack_seq_id;
-        int8_t         stack_output = 1; // 1 means generate logits for this token
+        struct llama_batch loop_batch = llama_batch_init(1, 0, 1);
 
-        // Allocate a blank struct on the stack
-        struct llama_batch loop_batch;
+        loop_batch.token[0] = tok;
+        loop_batch.pos[0] = pos;
+        loop_batch.n_seq_id[0] = n_seq;
+        //loop_batch.seq_id[0][0] = seq_id;           // Correct way
+        loop_batch.seq_id[0][0] = 0;     // ← Use 0
+        loop_batch.logits[0] = 1;
 
-        // Populate fields line-by-line to comply with MSVC's standard C engine
-        loop_batch.n_tokens = 1;
-        loop_batch.token = &tok;
-        loop_batch.embd = NULL;
-        loop_batch.pos = &stack_pos;
-        loop_batch.n_seq_id = &stack_n_seq;
-        loop_batch.seq_id = &stack_seq_ptr;
-
-        //  UNCOMMENTED AND MAPPED TO NATIVE FIELD NAME:
-        loop_batch.logits = &stack_output;
-
-        // Pass the stack-allocated structure directly to decode
         if (llama_decode(e->ctx, loop_batch) != 0) {
-            break; // Exit if context length is exceeded or desynced
+            llama_batch_free(loop_batch);
+            break;
         }
 
-        ++n_gen;
-        ++cur_pos;
+        llama_batch_free(loop_batch);
+
+        e->pos++;
+        n_gen++;
     }
-
-    // Persist final position pointer safely back into state engine
-    e->pos = cur_pos;
-
     return (int)out_len;
 }
+
+
+//int engine_generate_html(
+//    engine_t* e,
+//    const char* prompt,
+//    char* out,
+//    size_t out_size,
+//    int max_tokens,
+//    float temp,
+//    int top_k,
+//    float top_p,
+//    bool stream)
+//{
+//    if (!e || !e->model || !e->ctx || !prompt || !out || out_size == 0) return -1;
+//    out[0] = '\0';
+//    if (prompt[0] == '\0') return 0;
+//
+//    max_tokens = 512;   // you can make this a parameter later 128
+//    temp = 0.7f;
+//    top_k = 20;
+//    top_p = 0.9f;
+//
+//    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
+//
+//    // 1. Tokenize full prompt
+//    const int max_prompt_tokens = 4096;
+//    llama_token* tokens = malloc(max_prompt_tokens * sizeof(llama_token));
+//    if (!tokens) return -1;
+//
+//    int n_prompt = llama_tokenize(vocab, prompt, (int32_t)strlen(prompt),
+//        tokens, max_prompt_tokens, true, false);
+//
+//    if (n_prompt <= 0) {
+//        free(tokens);
+//        return -1;
+//    }
+//
+//    // 2. Full reset (recommended for your use case)
+//    engine_reset_context(e);
+//    struct llama_memory* mem = llama_get_memory(e->ctx);
+//    if (mem) {
+//        llama_memory_clear(mem, true);        // this is the current way
+//    }
+//
+//    // 3. Evaluate prompt (one big batch)
+//    struct llama_batch batch = llama_batch_init(n_prompt, 0, 1);
+//
+//    for (int i = 0; i < n_prompt; i++) {
+//        batch.token[i] = tokens[i];
+//        batch.pos[i] = i;
+//        batch.n_seq_id[i] = 1;
+//        batch.seq_id[i][0] = 0;               // sequence 0
+//        batch.logits[i] = (i == n_prompt - 1) ? 1 : 0;
+//    }
+//    batch.n_tokens = n_prompt;
+//
+//    if (llama_decode(e->ctx, batch) != 0) {
+//        llama_batch_free(batch);
+//        free(tokens);
+//        return -1;
+//    }
+//
+//    e->pos = n_prompt;
+//    llama_batch_free(batch);
+//    free(tokens);
+//
+//    // 4. Generation loop
+//    size_t out_len = 0;
+//    int n_gen = 0;
+//
+//    while (n_gen < max_tokens && out_len + 64 < out_size) {
+//        llama_token tok = sample_next(e, temp, top_k, top_p);
+//
+//        if (tok == llama_token_eos(e->model)) break;
+//
+//        char buf[128] = { 0 };
+//        int n = llama_token_to_piece(vocab, tok, buf, sizeof(buf), 0, false);
+//        if (n <= 0) break;
+//
+//        // Skip unwanted role tags in output
+//        if (!strstr(buf, "<|")) {
+//            if (out_len + (size_t)n >= out_size) break;
+//            memcpy(out + out_len, buf, n);
+//            out_len += n;
+//            out[out_len] = '\0';
+//        }
+//
+//        // Decode next token
+//        llama_pos      pos = e->pos;
+//        int32_t        n_seq = 1;
+//        llama_seq_id   seq = e->seq_id;
+//        llama_seq_id* seq_ptr = &seq;
+//        int8_t         logits = 1;
+//
+//        struct llama_batch loop_batch = {
+//            .n_tokens = 1,
+//            .token = &tok,
+//            .embd = NULL,
+//            .pos = &pos,
+//            .n_seq_id = &n_seq,
+//            .seq_id = &seq_ptr,
+//            .logits = &logits,
+//        };
+//
+//        if (llama_decode(e->ctx, loop_batch) != 0) break;
+//
+//        e->pos++;
+//        n_gen++;
+//    }
+//
+//    return (int)out_len;
+//}
+// 
+// 
+// 
+// ===================================================================
+// Generate html
+// ===================================================================
+//int engine_generate_html(
+//    engine_t* e,
+//    const char* prompt,
+//    char* out,
+//    size_t      out_size,
+//    int         max_tokens,
+//    float       temp,
+//    int         top_k,
+//    float       top_p,
+//    bool        stream
+//) {
+//    if (!e || !e->model || !e->ctx || !prompt || !out || out_size == 0) return -1;
+//    out[0] = '\0';
+//    if (prompt[0] == '\0') return 0;
+//
+//    max_tokens = 128;
+//    temp = 0.7f;
+//    top_k = 20;
+//    top_p = 0.9f;
+//
+//    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
+//
+//    // ============================================================
+//    // 1. MEASURE IMMUTABLE SYSTEM PROMPT
+//    // ============================================================
+//    const char* system_str = "<|system|>\nYou are a helpful assistant.\n\n";
+//    //llama_token sys_token_buf;
+//    llama_token sys_token_buf[128] = { 0 };
+//
+//    int32_t system_prompt_len = llama_tokenize(
+//        vocab,
+//        system_str,
+//        (int32_t)strlen(system_str),
+//        sys_token_buf, // Now safely passes the address of our 128-slot array
+//        128,
+//        true,
+//        false
+//    );
+//
+//    if (system_prompt_len <= 0) return -1;
+//
+//    engine_reset_context(e); 
+//
+//    // ============================================================
+//    // 2. DISCARD HISTORICAL LAYERS FROM CONTEXT CACHE
+//    // ============================================================
+//    struct llama_memory* mem = llama_get_memory(e->ctx);
+//    if (mem) {
+//        int32_t max_context_bound = llama_n_ctx(e->ctx);
+//
+//        // If an HTTP thread crossover, plugin execution, or state desync is caught:
+//        if (system_prompt_len <= 0 || system_prompt_len >= max_context_bound || e->pos < system_prompt_len) {
+//
+//            //  THE TRUE UNIFIED MEMORY SYSTEM CLEAN RESET:
+//            // By using llama_memory_clear with 'true', the library drops all active attention 
+//            // allocations across every sequence simultaneously. It does zero range testing, 
+//            // completely avoiding the ggml-base.dll abort() crash!
+//            llama_memory_clear(mem, true);
+//
+//            // Force the prompt tracking string to be fully re-evaluated from the absolute beginning
+//            system_prompt_len = 0;
+//            e->pos = 0;
+//        }
+//        else {
+//            // Normal conversation turn: Safe to remove trailing elements of the current active sequence
+//            // Using -1 for the final parameter in your era means "up to the end of the line"
+//            llama_memory_seq_rm(mem, 0, system_prompt_len, -1);
+//        }
+//    }
+//
+//    // ============================================================
+//    // 3. PARSE FULL COMBINED PROMPT STRING
+//    // ============================================================
+//    const int max_prompt_tokens = 4096;
+//    llama_token* tokens = malloc(max_prompt_tokens * sizeof(llama_token));
+//    if (!tokens) return -1;
+//
+//    int n_prompt = llama_tokenize(
+//        vocab, prompt, (int32_t)strlen(prompt),
+//        tokens, max_prompt_tokens,
+//        true,
+//        false
+//    );
+//    if (n_prompt <= 0) {
+//        free(tokens);
+//        return -1;
+//    }
+//
+//    if (n_prompt < system_prompt_len) {
+//        system_prompt_len = 0;
+//    }
+//
+//    int32_t tokens_to_add = n_prompt - system_prompt_len;
+//
+//
+//// ============================================================
+//// 4. PROMPT EVALUATION PHASE (FIXED ARRAY BASELINE OFFSET POINTER)
+//// ============================================================
+//    int decode_rc = 0;
+//    int64_t cur_pos = system_prompt_len;
+//
+//    if (tokens_to_add > 0) {
+//#define PROMPT_MAX_CAP 2048
+//
+//        if (tokens_to_add > PROMPT_MAX_CAP) {
+//            free(tokens);
+//            return -1;
+//        }
+//
+//        llama_pos      p_pos[PROMPT_MAX_CAP];
+//        int32_t        p_n_seq[PROMPT_MAX_CAP];
+//        llama_seq_id   p_seq_ids[PROMPT_MAX_CAP];
+//        llama_seq_id* p_seq_ptrs[PROMPT_MAX_CAP];
+//        int8_t         p_logits[PROMPT_MAX_CAP];
+//
+//        struct llama_batch prompt_batch;
+//
+//        prompt_batch.n_tokens = 0;
+//
+//        //  FIX: Point to the raw base address of the tokens array!
+//        // The loop below will use token indexing to read tokens starting from the system prompt length offset.
+//        prompt_batch.token = tokens;
+//        prompt_batch.embd = NULL;
+//        prompt_batch.pos = p_pos;
+//        prompt_batch.n_seq_id = p_n_seq;
+//        prompt_batch.seq_id = p_seq_ptrs;
+//        prompt_batch.logits = p_logits;
+//
+//        for (int i = 0; i < tokens_to_add; ++i) {
+//            // Calculate the actual token array offset position index cleanly
+//            int token_array_index = system_prompt_len + i;
+//
+//            p_pos[i] = (llama_pos)cur_pos;
+//            p_n_seq[i] = 1;
+//            p_seq_ids[i] = 0; // Keep sequence 0 bound
+//            p_seq_ptrs[i] = &p_seq_ids[i];
+//            p_logits[i] = (i == tokens_to_add - 1) ? 1 : 0;
+//
+//            // Copy the token from its offset location to the active batch slot position
+//            // This guarantees llama_decode reads real tokens instead of unallocated heap space!
+//            tokens[i] = tokens[token_array_index];
+//
+//            prompt_batch.n_tokens++;
+//            cur_pos++;
+//        }
+//
+//        if (prompt_batch.n_tokens > 0) {
+//            decode_rc = llama_decode(e->ctx, prompt_batch);
+//        }
+//
+//#undef PROMPT_MAX_CAP
+//    }
+//
+//    free(tokens);
+//
+//    if (decode_rc != 0) {
+//        return -1;
+//    }
+//
+//    e->pos = cur_pos;
+//
+//
+//
+//// ============================================================
+//// 5. GENERATION / SAMPLING LOOP (PURE STACK C REUSE)
+//// ============================================================
+//    size_t out_len = 0;
+//    int n_gen = 0;
+//
+//    while (n_gen < max_tokens && out_len + 8 < out_size) {
+//        llama_token tok = sample_next(e, temp, top_k, top_p);
+//
+//        // Stop on EOS
+//        if (tok == llama_token_eos(e->model)) break;
+//
+//        // Convert token to text
+//        char buf[128] = { 0 };
+//        int n = llama_token_to_piece(vocab, tok, buf, sizeof(buf), 0, false);
+//        if (n <= 0) break;
+//
+//        // BLOCK ONLY EXACT ROLE TAG TOKENS
+//        bool skip_output = false;
+//        if (strcmp(buf, "<|assistant|>") == 0 || strcmp(buf, "<|user|>") == 0 ||
+//            strcmp(buf, "<|system|>") == 0 || strcmp(buf, "assistant") == 0 ||
+//            strcmp(buf, "/assistant") == 0) {
+//            skip_output = true;
+//        }
+//
+//        // APPEND OUTPUT (ONLY IF NOT SKIPPED)
+//        if (!skip_output) {
+//            if (out_len + (size_t)n >= out_size) break;
+//            memcpy(out + out_len, buf, n);
+//            out_len += n;
+//            out[out_len] = '\0';
+//        }
+//
+//        // ============================================================
+//        // FIX: LINE-BY-LINE MSVC C ASSIGNMENT (NO COMPOUND LITERALS)
+//        // ============================================================
+//        // Declare backing arrays explicitly on the thread stack
+//        llama_pos      stack_pos = (llama_pos)cur_pos;
+//        int32_t        stack_n_seq = 1;
+//        llama_seq_id   stack_seq_id = e->seq_id;
+//        llama_seq_id* stack_seq_ptr = &stack_seq_id;
+//        int8_t         stack_output = 1; // 1 means generate logits for this token
+//
+//        // Allocate a blank struct on the stack
+//        struct llama_batch loop_batch;
+//
+//        // Populate fields line-by-line to comply with MSVC's standard C engine
+//        loop_batch.n_tokens = 1;
+//        loop_batch.token = &tok;
+//        loop_batch.embd = NULL;
+//        loop_batch.pos = &stack_pos;
+//        loop_batch.n_seq_id = &stack_n_seq;
+//        loop_batch.seq_id = &stack_seq_ptr;
+//
+//        //  UNCOMMENTED AND MAPPED TO NATIVE FIELD NAME:
+//        loop_batch.logits = &stack_output;
+//
+//        // Pass the stack-allocated structure directly to decode
+//        if (llama_decode(e->ctx, loop_batch) != 0) {
+//            break; // Exit if context length is exceeded or desynced
+//        }
+//
+//        ++n_gen;
+//        ++cur_pos;
+//    }
+//
+//    // Persist final position pointer safely back into state engine
+//    e->pos = cur_pos;
+//
+//    return (int)out_len;
+//}
 
 
 
@@ -966,15 +1272,21 @@ int engine_chat_html(
     if (!e || !user_input || !out || out_size == 0)
         return -1;
 
-    out[0] = 0;
+    out[0] = '\0';
+
+    // === FORCE CLEAN STATE ===
+   
+    //e->pos = 0;
+    engine_reset_context(e);           // ← Make sure this does llama_memory_clear + kv_cache_clear
+     //e->seq_id++;
 
     //
     // ⭐ 1. Reset KV cache for HTML chat
     //    (modern llama.cpp: seq_id++ = new KV namespace)
     //
 
-    e->seq_id++;
-    e->pos = 0;
+    //e->seq_id++;
+    //e->pos = 0;
 
 // ============================================================
 // HTML Plugin Router (argc/argv version)
@@ -983,7 +1295,7 @@ int engine_chat_html(
 	char* temp = NULL; 
 	const char* query = NULL;
     const char* user_input_query = NULL;
-    if (strncmp(user_input, "ddg ", 4) == 0) {
+    if (_strnicmp(user_input, "ddg ", 4) == 0) {
         query = user_input + 4;
         user_input_query = query;
         temp = _strdup(query);
@@ -1012,7 +1324,7 @@ int engine_chat_html(
         }
     }
       
-    if (strncmp(user_input, "websearch ", 10) == 0) {
+    if (_strnicmp(user_input, "websearch ", 10) == 0) {
         query = user_input + 10;
         user_input_query = query;
          temp = _strdup(query);
@@ -1041,7 +1353,7 @@ int engine_chat_html(
         }      
     }
 
-    if (strncmp(user_input, "summarize_file ", 15) == 0) {
+    if (_strnicmp(user_input, "summarize_file ", 15) == 0) {
 
         const char* raw = user_input + 15;
         while (*raw == ' ' || *raw == '\t') raw++;

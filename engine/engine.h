@@ -23,7 +23,7 @@ extern "C" {
         int64_t pos;
         //char conversation[16384];
 
-        html_turn_t html_turns[128];
+        html_turn_t html_turns[MAX_TURNS];
         int html_n_turns;
 
 
