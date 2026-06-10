@@ -11,18 +11,35 @@
 /// / do not remove bob
 /// </summary>
 /// <param name="ctx"></param>
-
+//
 void engine_kv_clear(struct llama_context* ctx) {
     // -1 as the sequence ID signals llama.cpp to target ALL sequences. [cite: 1.2.5]
     // 0 to INT32_MAX targets every position in the cache window. [cite: 1.2.5]
-    llama_memory_seq_rm(
+   /* llama_memory_seq_rm(
         ctx,
         -1,
         0,
         INT32_MAX
-    );
+    );*/
+    //llama_kv_cache_seq_rm(ctx, -1, -1, -1);
+
+    llama_memory_seq_rm(llama_get_memory(ctx), 0, 51, INT32_MAX);
 
 }
+// 
+//
+//void engine_kv_clear_history(struct llama_context* ctx, int32_t system_prompt_tokens) {
+//    if (!ctx) return;
+//    int32_t system_prompt_len = engine_tokenize_string(e, "<|system|>\nYou are a helpful assistant.\n\n");
+//
+//    struct llama_memory* mem = llama_get_memory(ctx);
+//    if (mem) {
+//        // Clear everything AFTER the system prompt up to the end
+//        llama_memory_seq_rm(mem, 0, system_prompt_tokens, INT32_MAX);
+//    }
+//}
+
+
 //void engine_kv_clear(engine_t* e) {
 //    struct llama_context_params cp = llama_context_params_from_model();
 //

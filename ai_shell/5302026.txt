@@ -23,8 +23,13 @@ OPEN_MODEL default C:\Projects\AI_Shell-main\Bob-llama-Q4_K_S.gguf
 
 OPEN default C:\Projects\AI_Shell-main\Bob-llama-Q4_K_S.gguf
 
+file:\\\C:\Users\btabor\source\ai_shell\server\chat.html
+
+
 
 ..\llama.cpp\ggml\include
+
+
 
 
 MODEL_TEST default "Hello"
