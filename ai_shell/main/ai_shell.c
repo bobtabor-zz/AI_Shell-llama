@@ -103,24 +103,24 @@ void cmd_infer(int argc, char** argv) {
     const char* prompt = argv[argc - 1];
 
     char out[8192];
-    int n = engine_generate(
-        g_engine,
-        prompt,
-        out,
-        sizeof(out),
-        128,
-        0.8f,
-        40,
-        0.9f,
-        true
-    );
+   /////////////* int n = engine_generate(
+   ////////////     g_engine,
+   ////////////     prompt,
+   ////////////     out,
+   ////////////     sizeof(out),
+   ////////////     128,
+   ////////////     0.8f,
+   ////////////     40,
+   ////////////     0.9f,
+   ////////////     true
+   //////////// );*/
 
-    if (n < 0) {
-        printf("ERR infer_failed\n");
-        return;
-    }
+   ///////////////////////* if (n < 0) {
+   //////////////////////     printf("ERR infer_failed\n");
+   //////////////////////     return;
+   ////////////////////// }
 
-    printf("OUT %s\n", out);
+   ////////////////////// pri*/ntf("OUT %s\n", out);
 }
 
 static char chat_history[65536];
@@ -185,28 +185,28 @@ static void dispatch(char* line) {
 
     }
 
-    else if (strcmp(cmd, "CHAT") == 0) {
-        char reply[4096];
+    //else if (strcmp(cmd, "CHAT") == 0) {
+    //    char reply[4096];
 
-        char user_msg[4096] = { 0 };
-        for (int i = 1; i < argc; i++) {
-            strcat(user_msg, argv[i]);
-            if (i + 1 < argc) strcat(user_msg, " ");
-        }
+    //    char user_msg[4096] = { 0 };
+    //    for (int i = 1; i < argc; i++) {
+    //        strcat(user_msg, argv[i]);
+    //        if (i + 1 < argc) strcat(user_msg, " ");
+    //    }
 
-        if (!g_engine) {
-            printf("ERR no_model_loaded\n");
-            return;
-        }
+    //    if (!g_engine) {
+    //        printf("ERR no_model_loaded\n");
+    //        return;
+    //    }
 
-        if (engine_chat(g_engine, user_msg, reply, sizeof(reply)) == 0) {
-            //printf("AI> %s\n", reply);
-        }
-        else {
-            printf("ERR chat_failed\n");
-        }
-        printf("\n");
-    }
+    //    if (engine_chat(g_engine, user_msg, reply, sizeof(reply)) == 0) {
+    //        //printf("AI> %s\n", reply);
+    //    }
+    //    else {
+    //        printf("ERR chat_failed\n");
+    //    }
+    //    printf("\n");
+    //}
 
 
     else if (strcmp(cmd, "PING") == 0) {

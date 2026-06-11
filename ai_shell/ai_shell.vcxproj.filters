@@ -23,8 +23,14 @@
     <ClCompile Include="plugins\websearch.c">
       <Filter>plugins</Filter>
     </ClCompile>
-    <ClCompile Include="engine\engine_kv.c">
-      <Filter>engine</Filter>
+    <ClCompile Include="server\http_server.c">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="server\summarize_file_html.c">
+      <Filter>server</Filter>
+    </ClCompile>
+    <ClCompile Include="plugins\cJSON.c">
+      <Filter>plugins</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -42,6 +48,9 @@
     </ClInclude>
     <ClInclude Include="engine\engine_kv.h">
       <Filter>engine</Filter>
+    </ClInclude>
+    <ClInclude Include="server\http_server.h">
+      <Filter>server</Filter>
     </ClInclude>
   </ItemGroup>
   <ItemGroup>
@@ -71,6 +80,9 @@
     </Filter>
     <Filter Include="llama">
       <UniqueIdentifier>{092a5475-7f7b-4df9-84a3-cf749edbbefc}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="server">
+      <UniqueIdentifier>{31e32243-e879-4835-b03e-289d3c37379c}</UniqueIdentifier>
     </Filter>
   </ItemGroup>
 </Project>

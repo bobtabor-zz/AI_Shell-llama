@@ -20,24 +20,35 @@ extern "C" {
     typedef struct engine {
         struct llama_model* model;
         struct llama_context* ctx;
-        int64_t pos;
+        //int64_t pos;
         //char conversation[16384];
 
         html_turn_t html_turns[128];
         int html_n_turns;
 
+        int html_seq_id;   // always 0 for HTML chat
 
         engine_turn_t turns[MAX_TURNS];
         int n_turns;
 
+        int32_t seq_id;   // single stable sequence
+        llama_pos pos;    // current position in this sequence
+        // --- Sampling parameters (needed for incremental generation) ---
+        float temp;
+        int   top_k;
+        float top_p;
+
         // ⭐ KV subsystem
-        int32_t seq_id;
+        
         bool    kv_valid;      // is there a meaningful sequence in KV?
         int64_t kv_len;        // how many tokens are currently in KV?
 
     } engine_t;
 
     void engine_recreate_context(engine_t* e);
+
+    // Inside engine.h
+    void engine_reset(engine_t* e);
 
    int engine_chat(engine_t* e,
         const char* user_input,
