@@ -67,30 +67,23 @@ void engine_init_runtime(engine_t* e) {
 // Llama-3 chat template wrappers (manual, no <|begin_of_text|>)
 // ------------------------------------------------------------
 
-static void engine_wrap_llama3_system(
-    char* dst,
-    size_t dst_size,
-    const char* system_text)
-{
+static void engine_wrap_llama3_system(char* dst, size_t dst_size, const char* system_text) {
     snprintf(dst, dst_size,
-        "<|start_header_id|>system<|end_header_id|>\n"
+        "<|start_header_id|>system<|end_header_id|>\n\n" // Fixed: Added extra \n
         "%s<|eot_id|>\n",
         system_text
     );
 }
 
-static void engine_wrap_llama3_user(
-    char* dst,
-    size_t dst_size,
-    const char* user_text)
-{
+static void engine_wrap_llama3_user(char* dst, size_t dst_size, const char* user_text) {
     snprintf(dst, dst_size,
-        "<|start_header_id|>user<|end_header_id|>\n"
+        "<|start_header_id|>user<|end_header_id|>\n\n" // Fixed: Added extra \n
         "%s<|eot_id|>\n"
-        "<|start_header_id|>assistant<|end_header_id|>\n",
+        "<|start_header_id|>assistant<|end_header_id|>\n\n", // Fixed: Added extra \n
         user_text
     );
 }
+
 
 // ------------------------------------------------------------
 // Simple sampler (greedy; swap with your sampler if desired)
@@ -131,8 +124,8 @@ int engine_feed_system_prompt(engine_t* e, const char* system_text) {
         (int32_t)strlen(buf),
         tokens,
         1024,
-        false,   // no automatic special tokens
-        false
+        false,  // add_special: false (we wrap them manually)
+        true    // FIX: parse_special MUST be true to recognize Llama 3 <|control|> tags!
     );
     if (n_tokens <= 0) return -1;
 
@@ -144,6 +137,7 @@ int engine_feed_system_prompt(engine_t* e, const char* system_text) {
     llama_seq_id* seq_ptr_arr[1024];
     int8_t         logits_arr[1024];
 
+    // Array bindings matching your llama.cpp layout specification
     batch.token = tokens;
     batch.pos = pos_arr;
     batch.n_seq_id = n_seq_arr;
@@ -158,16 +152,19 @@ int engine_feed_system_prompt(engine_t* e, const char* system_text) {
         n_seq_arr[i] = 1;
         seq_id_arr[i] = e->seq_id;
         seq_ptr_arr[i] = &seq_id_arr[i];
-        logits_arr[i] = (i == n_tokens - 1) ? 1 : 0;
+        logits_arr[i] = (i == n_tokens - 1) ? 1 : 0; // Request logits only for the very last token
 
         batch.n_tokens++;
         pos++;
     }
 
-    if (llama_decode(e->ctx, batch) != 0) {
-        return -1;
+    // Direct initialization pass evaluation
+    int decode_rc = llama_decode(e->ctx, batch);
+    if (decode_rc != 0) {
+        return -1; // Aborts back to engine_open cleanly if initialization fails
     }
 
+    // Update your application context states
     e->pos = pos;
     e->kv_valid = true;
     e->kv_len = pos;
@@ -175,68 +172,7 @@ int engine_feed_system_prompt(engine_t* e, const char* system_text) {
     return 0;
 }
 
-// ------------------------------------------------------------
-// Feed user message (templated) incrementally
-// ------------------------------------------------------------
 
-//int engine_feed_user(engine_t* e, const char* user_text_raw) {
-//    if (!e || !e->model || !e->ctx) return -1;
-//
-//    const struct llama_vocab* vocab = llama_model_get_vocab(e->model);
-//
-//    char wrapped[8192];
-//    engine_wrap_llama3_user(wrapped, sizeof(wrapped), user_text_raw);
-//
-//    llama_token tokens[2048];
-//    int n_tokens = llama_tokenize(
-//        vocab,
-//        wrapped,
-//        (int32_t)strlen(wrapped),
-//        tokens,
-//        2048,
-//        false,   // no automatic special tokens
-//        false
-//    );
-//    if (n_tokens <= 0) return -1;
-//
-//    struct llama_batch batch = (struct llama_batch){ 0 };
-//
-//    llama_pos      pos_arr[2048];
-//    int32_t        n_seq_arr[2048];
-//    llama_seq_id   seq_id_arr[2048];
-//    llama_seq_id* seq_ptr_arr[2048];
-//    int8_t         logits_arr[2048];
-//
-//    batch.token = tokens;
-//    batch.pos = pos_arr;
-//    batch.n_seq_id = n_seq_arr;
-//    batch.seq_id = seq_ptr_arr;
-//    batch.logits = logits_arr;
-//    batch.n_tokens = 0;
-//
-//    llama_pos pos = e->pos;
-//
-//    for (int i = 0; i < n_tokens; ++i) {
-//        pos_arr[i] = pos;
-//        n_seq_arr[i] = 1;
-//        seq_id_arr[i] = e->seq_id;
-//        seq_ptr_arr[i] = &seq_id_arr[i];
-//        logits_arr[i] = (i == n_tokens - 1) ? 1 : 0;
-//
-//        batch.n_tokens++;
-//        pos++;
-//    }
-//
-//    if (llama_decode(e->ctx, batch) != 0) {
-//        return -1;
-//    }
-//
-//    e->pos = pos;
-//    e->kv_valid = true;
-//    e->kv_len = pos;
-//
-//    return 0;
-//}
 
 // ------------------------------------------------------------
 // Feed user message (templated) incrementally - STABLE NATIVE BATCH
@@ -256,18 +192,9 @@ int engine_feed_user(engine_t* e, const char* user_text_raw) {
     engine_wrap_llama3_user(wrapped, wrapped_size, user_text_raw);
 
     // 2. Perform a dry-run token count request
-    int n_tokens = llama_tokenize(
-        vocab,
-        wrapped,
-        (int32_t)strlen(wrapped),
-        NULL,
-        0,
-        false,
-        false
-    );
-
+    int n_tokens = llama_tokenize(vocab, wrapped, (int32_t)strlen(wrapped), NULL, 0, false, true);
     if (n_tokens < 0) n_tokens = -n_tokens;
-    if (n_tokens <= 0) {
+    if (n_tokens <= 0 || n_tokens > 2048) { // Security bounds checking safety check
         free(wrapped);
         return -1;
     }
@@ -279,58 +206,76 @@ int engine_feed_user(engine_t* e, const char* user_text_raw) {
         return -1;
     }
 
-    int actual_tokens = llama_tokenize(
-        vocab,
-        wrapped,
-        (int32_t)strlen(wrapped),
-        tokens,
-        n_tokens,
-        false,
-        false
-    );
-
+    int actual_tokens = llama_tokenize(vocab, wrapped, (int32_t)strlen(wrapped), tokens, n_tokens, false, true);
     free(wrapped);
     if (actual_tokens <= 0) {
         free(tokens);
         return -1;
     }
 
-    // 4. Initialize a MANAGED batch structure
-    struct llama_batch batch = llama_batch_init(actual_tokens, 0, 1);
+    // =========================================================================
+    // FIX: STACK ALLOCATE THE ARRAYS TO ELIMINATE LLAMA_BATCH_FREE() COMPLETELY
+    // =========================================================================
+    struct llama_batch batch = (struct llama_batch){ 0 };
+
+    // Dynamically size these stack arrays using Visual Studio VLA or standard local buffers
+    // 2048 provides an immense safety ceiling for common incoming user turns
+#define USER_FEED_MAX_TOKENS 2048
+    if (actual_tokens > USER_FEED_MAX_TOKENS) {
+        free(tokens);
+        return -1;
+    }
+
+    llama_pos      pos_arr[USER_FEED_MAX_TOKENS];
+    int32_t        n_seq_arr[USER_FEED_MAX_TOKENS];
+    llama_seq_id   seq_id_arr[USER_FEED_MAX_TOKENS];
+    llama_seq_id* seq_ptr_arr[USER_FEED_MAX_TOKENS];
+    int8_t         logits_arr[USER_FEED_MAX_TOKENS];
+
+    // Assign your framework's exact pointer properties safely
+    batch.token = tokens;
+    batch.pos = pos_arr;
+    batch.n_seq_id = n_seq_arr;
+    batch.seq_id = seq_ptr_arr;
+    batch.logits = logits_arr;
+    batch.n_tokens = 0;
 
     llama_pos current_pos = e->pos;
 
-    // 5. Native assignment loop - completely removes the external llama_batch_add function call dependency
+    // 5. Explicit assignment mapping
     for (int i = 0; i < actual_tokens; ++i) {
-        int32_t token_index = batch.n_tokens;
-
-        batch.token[token_index] = tokens[i];
-        batch.pos[token_index] = current_pos;
-        batch.n_seq_id[token_index] = 1;
-        batch.seq_id[token_index][0] = e->seq_id;
-        batch.logits[token_index] = (i == actual_tokens - 1) ? 1 : 0; // Request logits only for final token
+        pos_arr[i] = current_pos;
+        n_seq_arr[i] = 1;
+        seq_id_arr[i] = e->seq_id;
+        seq_ptr_arr[i] = &seq_id_arr[i];
+        logits_arr[i] = (i == actual_tokens - 1) ? 1 : 0; // Logits requested for sampler only
 
         batch.n_tokens++;
         current_pos++;
     }
 
-    // 6. Execute inference decoding
+    // 6. Execute inference decoding safely
     int decode_rc = llama_decode(e->ctx, batch);
 
-    // 7. Dynamic memory cleanup
+    // 7. Dynamic memory cleanup 
     free(tokens);
-    llama_batch_free(batch);
+
+    // REMOVED: llama_batch_free(batch) is gone. 
+    // The memory drops out of local stack scopes automatically without ntdll.dll tracking problems!
 
     if (decode_rc != 0) {
-        return -1;
+        return decode_rc; // Let the main generator handle the context shift if it overflows here
     }
 
+    // 8. Commit tracker values on success states
     e->pos = current_pos;
     e->kv_valid = true;
     e->kv_len = current_pos;
 
     return 0;
 }
+
+
 
 // ------------------------------------------------------------
 // Generate assistant reply incrementally - STABLE NATIVE BATCH
@@ -400,7 +345,62 @@ int engine_generate_reply(
         batch.n_tokens++;
 
         // 5. Decode token tracking parameters safely
-        int decode_rc = llama_decode(e->ctx, batch);
+        int decode_rc = 0;
+        decode_rc = llama_decode(e->ctx, batch);
+        if (decode_rc != 0) {
+            llama_memory_t mem = llama_get_memory(e->ctx);
+            if (mem) {
+                // 1. Fetch the exact active context size allocated for this session
+                int32_t active_ctx_size = llama_n_ctx(e->ctx);
+
+                // 2. Safely lock your system prompt reservation limits
+                const int32_t system_prompt_tokens = 512;
+
+                // 3. ADAPTIVE SHIFTING MATH:
+                // Clear out roughly 25% of the total window size, with a fallback ceiling
+                int32_t discard_chunk = active_ctx_size / 4;
+                if (discard_chunk < 512)  discard_chunk = 512;
+                if (discard_chunk > 2048) discard_chunk = 2048; // Don't wipe too much chat memory at once
+
+                const int32_t remove_start = system_prompt_tokens;
+                const int32_t remove_end = system_prompt_tokens + discard_chunk;
+
+                // Verify that we aren't trying to remove more than the total context window size
+                if (remove_end >= active_ctx_size) {
+                    // Panic check: model window is too small to even hold these constraints
+                    llama_batch_free(batch);
+                    return decode_rc;
+                }
+
+                // 4. Remove and slide context memory safely
+                llama_memory_seq_rm(mem, e->seq_id, remove_start, remove_end);
+                llama_memory_seq_add(mem, e->seq_id, remove_end, -1, -discard_chunk);
+
+                // 5. Re-align your structural engine history tracking positions
+                e->pos -= discard_chunk;
+
+                // Restore the batch token counter back to 1 explicitly
+                batch.n_tokens = 1;
+
+                // Explicitly assign to index [0] of the batch array pointers.
+                batch.token[0] = tok;
+                batch.pos[0] = e->pos;
+                batch.n_seq_id[0] = 1;
+                batch.seq_id[0][0] = e->seq_id;
+                batch.logits[0] = 1;
+
+                // Retry decoding the token onto the cleared cache timelines
+                decode_rc = llama_decode(e->ctx, batch);
+                if (decode_rc != 0) {
+                    llama_batch_free(batch);
+                    return decode_rc;
+                }
+            }
+            else {
+                llama_batch_free(batch);
+                return decode_rc;
+            }
+        }
 
         // 6. Free managed batch tracking objects
         llama_batch_free(batch);
@@ -416,38 +416,6 @@ int engine_generate_reply(
 
     return (int)out_len;
 }
-
-
-// ------------------------------------------------------------
-// HTML chat entry point
-// ------------------------------------------------------------
-//
-//int engine_chat_html(
-//    engine_t* e,
-//    const char* user_input,
-//    char* out,
-//    size_t out_size)
-//{
-//    if (!e || !user_input || !out || out_size == 0)
-//        return -1;
-//
-//    out[0] = 0;
-//
-//    if (engine_feed_user(e, user_input) != 0)
-//        return -1;
-//
-//    int rc = engine_generate_reply(e, out, out_size, 128);
-//    if (rc < 0)
-//        return rc;
-//
-//    if (e->html_n_turns < 128) {
-//        // optional: track turns for UI
-//        // html_turn_t *t = &e->html_turns[e->html_n_turns++];
-//        // fill t->role / t->text if needed
-//    }
-//
-//    return rc;
-//}
 
 
 // ------------------------------------------------------------
@@ -657,9 +625,26 @@ engine_t* engine_open(const char* model_path) {
     }
 
     struct llama_context_params cparams = llama_context_default_params();
-    cparams.n_seq_max = 1;
-    // cparams.n_ctx = 8192; // optional
 
+    // DYNAMIC METADATA EXTRACTION
+    // Read the native maximum training context limit embedded directly inside the GGUF file
+    int32_t model_train_ctx = llama_model_n_ctx_train(e->model);
+
+    if (model_train_ctx > 0) {
+        // Successfully pulled from GGUF metadata. Assign it directly!
+        cparams.n_ctx = model_train_ctx;
+        printf("[SUCCESS] GGUF metadata found! Context length auto-populated to: %d tokens.\n", cparams.n_ctx);
+    }
+    else {
+        // Fallback guard condition in case the metadata key is missing
+        cparams.n_ctx = 4096;
+        printf("[WARN] GGUF metadata context length unavailable. Falling back to default: 4096 tokens.\n");
+    }
+
+    // Keep sequence scaling optimized for your singular tracking stream
+    cparams.n_seq_max = 1;
+
+    // Allocate memory matching the precise dynamic token ceiling
     e->ctx = llama_new_context_with_model(e->model, cparams);
     if (!e->ctx) {
         llama_free_model(e->model);
@@ -676,6 +661,7 @@ engine_t* engine_open(const char* model_path) {
 
     return e;
 }
+
 
 void engine_close(engine_t* e) {
     if (!e) return;

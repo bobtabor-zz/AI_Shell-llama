@@ -29,6 +29,9 @@
     <ClCompile Include="server\summarize_file_html.c">
       <Filter>server</Filter>
     </ClCompile>
+    <ClCompile Include="plugins\cJSON.c">
+      <Filter>plugins</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="engine\engine.h">

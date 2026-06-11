@@ -5,6 +5,33 @@
     <title>Local AI Chat</title>
 
     <style>
+        .json-block {
+            background: #1e1e1e;
+            border: 1px solid #444;
+            border-radius: 6px;
+            padding: 8px;
+            margin-top: 6px;
+            font-family: monospace;
+            font-size: 13px;
+            color: #ddd;
+        }
+
+        .json-toggle {
+            cursor: pointer;
+            color: #4ea1ff;
+            font-weight: bold;
+            margin-bottom: 4px;
+            user-select: none;
+        }
+
+        .json-content {
+            display: none;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            margin-top: 6px;
+        }
+
+
         body {
             margin: 0;
             background: #111;
@@ -79,6 +106,8 @@
             border-radius: 12px;
             line-height: 1.4;
             white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
         }
 
         .user {
@@ -232,10 +261,25 @@
         function addMessage(text, role) {
             const div = document.createElement("div");
             div.className = `msg ${role}`;
-            div.textContent = text;
+
+            // Start with raw text
+            let html = text;
+
+            // 🔥 Extract image URLs anywhere in the text (even inside JSON)
+            const urlRegex = /(https?:\/\/\S+\.(?:jpg|jpeg|png|gif))/gi;
+            html = html.replace(urlRegex, url => {
+                return `<img src="${url}" style="max-width:100%; border-radius:8px; margin:8px 0;">`;
+            });
+
+            // Let text wrap naturally
+            div.innerHTML = html;
+
             document.getElementById("chat").appendChild(div);
             document.getElementById("chat").scrollTop = chat.scrollHeight;
         }
+
+
+
 
         function storeMessage(text, role) {
             conversations[convId].push({ role, text });

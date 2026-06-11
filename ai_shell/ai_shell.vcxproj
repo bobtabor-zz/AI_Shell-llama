@@ -75,6 +75,7 @@
     <ClCompile Include="loader\gguf_loader.c" />
     <ClCompile Include="main\ai_shell.c" />
     <ClCompile Include="engine\engine.c" />
+    <ClCompile Include="plugins\cJSON.c" />
     <ClCompile Include="plugins\ddg.c" />
     <ClCompile Include="plugins\summarize_file.c" />
     <ClCompile Include="plugins\websearch.c" />
