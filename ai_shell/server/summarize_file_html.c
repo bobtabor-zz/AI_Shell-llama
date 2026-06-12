@@ -70,22 +70,22 @@ static char* call_llm_summary_html(const char* prompt) {
 
     // You already override max_tokens/temp/top_k/top_p inside engine_generate,
     // so these values are mostly placeholders.
-    int rc = engine_generate_html(
-        g_engine,
-        prompt,
-        out,
-        sizeof(out),
-        64,        // max_tokens (will be overridden by your hard-coded block)
-        0.7f,
-        20,
-        0.9f,
-        false   // plugins use silent mode for internal chunk summaries
-    );
+    ////////////////int rc = engine_generate_html(
+    ////////////////    g_engine,
+    ////////////////    prompt,
+    ////////////////    out,
+    ////////////////    sizeof(out),
+    ////////////////    64,        // max_tokens (will be overridden by your hard-coded block)
+    ////////////////    0.7f,
+    ////////////////    20,
+    ////////////////    0.9f,
+    ////////////////    false   // plugins use silent mode for internal chunk summaries
+    ////////////////);
 
-    if (rc < 0)
-        return _strdup("llm error");
-
-    return _strdup(out);
+//////////////////////   /* if (rc < 0)
+//////////////////////        return _strdup("llm error");
+//////////////////////
+//////////////////////    return _strdup(out);
 }
 
 
@@ -107,8 +107,6 @@ static char* summarize_chunk_html(const char* text) {
 
     return call_llm_summary_html(prompt);
 }
-
-
 
 static char* merge_summaries_html(const char** parts, int count) {
     const int MAX_PARTS = 12;
@@ -138,17 +136,17 @@ static char* merge_summaries_html(const char** parts, int count) {
     // ⭐ STREAMING FINAL SUMMARY
     char out[4096] = { 0 };
 
-    engine_generate_html(
-        g_engine,
-        prompt,
-        out,
-        sizeof(out),
-        64,      // max tokens (your engine overrides this anyway)
-        0.7f,
-        20,
-        0.9f,
-        true     // ⭐ STREAM ENABLED
-    );
+    ////////////////////////////engine_generate_html(
+    ////////////////////////////    g_engine,
+    ////////////////////////////    prompt,
+    ////////////////////////////    out,
+    ////////////////////////////    sizeof(out),
+    ////////////////////////////    64,      // max tokens (your engine overrides this anyway)
+    ////////////////////////////    0.7f,
+    ////////////////////////////    20,
+    ////////////////////////////    0.9f,
+    ////////////////////////////    true     // ⭐ STREAM ENABLED
+    ////////////////////////////);
 
     // Return the captured output buffer
     return _strdup(out);
