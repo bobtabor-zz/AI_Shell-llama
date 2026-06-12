@@ -8,6 +8,8 @@
 #include "llama.h"
 #include "engine.h"   // defines engine_t, html_turn_t, engine_turn_t, MAX_TURNS
 #include "../include/plugin.h"
+#include "../vmm/vmm.h"
+
 
 char* g_plugin_result = NULL;
 
@@ -261,7 +263,7 @@ int engine_feed_user(engine_t* e, const char* user_text_raw) {
 
     // Dynamically size these stack arrays using Visual Studio VLA or standard local buffers
     // 2048 provides an immense safety ceiling for common incoming user turns
-#define USER_FEED_MAX_TOKENS 2048
+    #define USER_FEED_MAX_TOKENS 2048
     if (actual_tokens > USER_FEED_MAX_TOKENS) {
         free(tokens);
         return -1;
@@ -738,6 +740,22 @@ engine_t* engine_open(const char* model_path) {
         free(e);
         return NULL;
     }
+        
+    const char* vmm_path = "vmm.bin";
+
+    e->vmm_model = vmm_model_open(model_path, vmm_path,
+        8ull * 1024 * 1024 * 1024);
+
+    if (!e->vmm_model) {
+        fprintf(stderr,
+            "[ENGINE] VMM disabled (vmm_model_open failed for GGUF=%s VMM=%s)\n",
+            model_path, vmm_path);
+        // DO NOT tear down the engine here.
+        // Just run without VMM.
+    }
+
+
+
 
     return e;
 }
@@ -745,6 +763,10 @@ engine_t* engine_open(const char* model_path) {
 
 void engine_close(engine_t* e) {
     if (!e) return;
+
+    if (e->vmm_model) {
+        vmm_model_close(e->vmm_model);
+    }
 
     if (e->ctx) {
         llama_free(e->ctx);
