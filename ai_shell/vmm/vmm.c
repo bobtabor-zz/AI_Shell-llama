@@ -111,34 +111,7 @@ vmm_model_t* vmm_model_open(
         }
     }
 
-    //if (vmm_sanity_check(vmm, vmm_path, hdr) != 0) {
-    //    fprintf(stderr, "[VMM] sanity failed — rebuilding\n");
-    //    vmm_unmap(vmm, hdr_ptr, 64 * 1024);
-    //    vmm_destroy(vmm);
-
-    //    int rc = vmm_model_build_from_gguf(
-    //        gguf_path,
-    //        vmm_path,
-    //        vmm_budget_bytes);
-
-    //    if (rc != 0) {
-    //        fprintf(stderr, "[VMM] rebuild_from_gguf FAILED rc=%d\n", rc);
-    //        return NULL;
-    //    }
-
-    //    // reopen
-    //    vmm = vmm_create(vmm_path, 0, VMM_MODE_OPEN_EXISTING);
-    //    hdr_ptr = vmm_map(vmm, 0, 64 * 1024);
-    //    hdr = (vmm_model_header_t*)hdr_ptr;
-
-    //    if (vmm_sanity_check(vmm, vmm_path, hdr) != 0) {
-    //        fprintf(stderr, "[VMM] sanity STILL failing after rebuild\n");
-    //        vmm_unmap(vmm, hdr_ptr, 64 * 1024);
-    //        vmm_destroy(vmm);
-    //        return NULL;
-    //    }
-    //}
-
+    
     fprintf(stderr, "[VMM] USING vmm.bin (magic OK, tensors=%u)\n", hdr->tensor_count);
 
     // ---- 4. Map meta table ----
@@ -226,10 +199,6 @@ vmm_model_t* vmm_model_open(
 
      fprintf(stderr, "================== END VMM INSPECTOR ==================\n\n");
  }
-
-
-
-
 
 
 static int vmm_model_build_from_gguf(

@@ -50,6 +50,10 @@ extern "C" {
 
     void engine_recreate_context(engine_t* e);
 
+    void send_sse(const char* msg);
+
+    void send_status(const char* msg);
+
     // Inside engine.h
     void engine_reset(engine_t* e);
 

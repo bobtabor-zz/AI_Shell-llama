@@ -13,6 +13,12 @@
 
 char* g_plugin_result = NULL;
 
+//void send_sse(const char* msg);
+//
+//void send_status(const char* msg) {
+//    send_sse(msg);   // or send_event(), or send_message(), etc.
+//}
+
 
 char* engine_json_extract_string(char* s, char* out, size_t out_sz)
 {
@@ -379,9 +385,25 @@ int engine_generate_reply(
 
     llama_token eos_tok = llama_token_eos(vocab);
     llama_token eot_tok = llama_token_eot(vocab);
+    int real_count = 0;
+
+    send_status("STATUS:TICKER: Starting Token run!");
 
     while (n_gen < max_tokens && out_len + 8 < out_size) {
+
+        real_count++;
+
         llama_token tok = engine_sample_next(e);
+
+        char count_str[32];
+        snprintf(count_str, sizeof(count_str), "%u", real_count);
+
+        char msg[128];
+        snprintf(msg, sizeof(msg), "STATUS:TICKER: Token count: %s", count_str);
+
+        //nd_status(msg);
+
+        send_sse(msg);
 
         if (tok == eos_tok || tok == eot_tok || llama_token_is_control(vocab, tok) || llama_token_is_eog(vocab, tok)) {
             break;
@@ -697,6 +719,8 @@ engine_t* engine_open(const char* model_path) {
     engine_t* e = calloc(1, sizeof(engine_t));
     if (!e) return NULL;
 
+    send_status("STATUS:TICKER:Building VMM file…");
+
     engine_init_runtime(e);
 
     struct llama_model_params mparams = llama_model_default_params();
@@ -726,6 +750,8 @@ engine_t* engine_open(const char* model_path) {
     // Keep sequence scaling optimized for your singular tracking stream
     cparams.n_seq_max = 1;
 
+    send_status("STATUS:TICKER:Allocating context…");
+
     // Allocate memory matching the precise dynamic token ceiling
     e->ctx = llama_new_context_with_model(e->model, cparams);
     if (!e->ctx) {
@@ -740,11 +766,12 @@ engine_t* engine_open(const char* model_path) {
         free(e);
         return NULL;
     }
-        
+    send_status("STATUS:TICKER:Building VMM file…");
+
     const char* vmm_path = "vmm.bin";
 
     e->vmm_model = vmm_model_open(model_path, vmm_path,
-        8ull * 1024 * 1024 * 1024);
+        8ull * 1024 * 1024 * 1024); // 8 gig 8ull;  10gig 10ull;
    fprintf(stderr, "[DEBUG] vmm_model_open -> %p\n", (void*)e->vmm_model);
      
     if (!e->vmm_model) {
@@ -754,6 +781,7 @@ engine_t* engine_open(const char* model_path) {
         // DO NOT tear down the engine here.
         // Just run without VMM.
     }
+    send_status("STATUS:TICKER:Opening VMM…");
 
     if (e->vmm_model != NULL &&
         (uintptr_t)e->vmm_model > 0x10000 &&   // not tiny garbage

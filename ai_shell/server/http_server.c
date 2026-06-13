@@ -16,6 +16,15 @@ static int running = 1;
 extern engine_t* g_engine;
 char* json_escape(const char* s);
 
+static SOCKET sse_client = INVALID_SOCKET;
+
+void send_status(const char* msg);
+
+
+void send_status(const char* msg) {
+    send_sse(msg);
+}
+
 
 // ADD THIS HERE
 char* json_escape(const char* s) {
@@ -209,6 +218,28 @@ static void handle_client(SOCKET client) {
         return;
     }
 
+    // ============================================================
+    // SSE endpoint
+    // ============================================================
+    if (strncmp(buffer, "GET /events", 11) == 0) {
+
+        const char* hdr =
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/event-stream\r\n"
+            "Cache-Control: no-cache\r\n"
+            "Connection: keep-alive\r\n"
+            "Access-Control-Allow-Origin: *\r\n"
+            "\r\n";
+
+        send(client, hdr, (int)strlen(hdr), 0);
+
+        // store this client as the active SSE connection
+        sse_client = client;
+
+        // DO NOT close the socket here — keep it open
+        return;
+    }
+
 
 
     // ============================================================
@@ -283,4 +314,13 @@ void test_json_escape() {
     printf("ESCAPED:\n%s\n\n", escaped);
 
     free(escaped);
+}
+
+void send_sse(const char* msg) {
+    if (sse_client == INVALID_SOCKET) return;
+
+    char buf[4096];
+    // Send raw text as data (simplest for token streaming)
+    int len = snprintf(buf, sizeof(buf), "data: %s\n\n", msg);
+    send(sse_client, buf, len, 0);
 }

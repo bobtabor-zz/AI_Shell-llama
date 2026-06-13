@@ -13,6 +13,9 @@ extern "C" {
 	// Stop server (optional)
 	void http_server_stop(void);
 
+	void send_sse(const char* msg);
+
+
 #ifdef __cplusplus
 }
 #endif

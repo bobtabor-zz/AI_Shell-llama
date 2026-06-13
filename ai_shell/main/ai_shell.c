@@ -272,16 +272,6 @@ int main(void) {
     // ⭐ START HTTP SERVER IN BACKGROUND THREAD ⭐
     CreateThread(NULL, 0, (LPTHREAD_START_ROUTINE)http_server_start, (void*)8080, 0, NULL);
 
-    /*CreateThread(
-        NULL,
-        0,
-        http_server_thread,
-        (LPVOID)(intptr_t)8080,
-        0,
-        NULL
-    );*/
-
-
     printf("[http] server running on http://localhost:8080\n");
 
     printf("ai> ");
