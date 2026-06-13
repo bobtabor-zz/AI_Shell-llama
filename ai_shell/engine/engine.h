@@ -1,6 +1,7 @@
 #pragma once
 #include <stddef.h>
 #include "llama.h"
+#include "../vmm/vmm.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,6 +38,8 @@ extern "C" {
         float temp;
         int   top_k;
         float top_p;
+
+        vmm_model_t* vmm_model;
 
         // ⭐ KV subsystem
         
