@@ -41,7 +41,7 @@ vmm_model_t* vmm_model_open(
     // ---- 1. If vmm.bin does NOT exist → build it ----
     FILE* f = fopen(vmm_path, "rb");
     if (!f) {
-        fprintf(stderr, "[VMM] vmm.bin missing → building\n");
+        fprintf(stderr, "[VMM] vmm.bin missing -> building\n");
 
         int rc = vmm_model_build_from_gguf(
             gguf_path,
@@ -162,73 +162,72 @@ vmm_model_t* vmm_model_open(
     fprintf(stderr, "[VMM] open OK: tensors=%u\n", m->tensor_count);
     return m;
 }
+ 
+ void vmm_inspect(vmm_model_t* m) {
+     if (!m || !m->vmm || !m->meta) {
+         fprintf(stderr, "[VMM] inspect: invalid model\n");
+         return;
+     }
+     int real_count = 0;
+     uint64_t file_size = vmm_budget(m->vmm);
 
-void vmm_inspect(vmm_model_t* m) {
-    if (!m || !m->vmm || !m->meta) {
-        fprintf(stderr, "[VMM] inspect: invalid model\n");
-        return;
-    }
+     fprintf(stderr, "\n==================== VMM INSPECTOR ====================\n");
+     fprintf(stderr, "File: vmm.bin\n");
+     fprintf(stderr, "File size: %llu bytes\n", (unsigned long long)file_size);
+     fprintf(stderr, "Tensor count: %u\n", m->tensor_count);
+     fprintf(stderr, "Meta offset: %llu\n", (unsigned long long)m->meta_offset);
+     fprintf(stderr, "Data offset: %llu\n", (unsigned long long)m->data_offset);
+     fprintf(stderr, "--------------------------------------------------------\n");
 
-    int real_count = 0;
-    uint64_t file_size = vmm_budget(m->vmm);
+     uint64_t last_end = m->data_offset;
 
-    fprintf(stderr, "\n==================== VMM INSPECTOR ====================\n");
-    fprintf(stderr, "File: vmm.bin\n");
-    fprintf(stderr, "File size: %llu bytes\n", (unsigned long long)file_size);
-    fprintf(stderr, "Tensor count: %u\n", m->tensor_count);
-    fprintf(stderr, "Meta offset: %llu\n", (unsigned long long)m->meta_offset);
-    fprintf(stderr, "Data offset: %llu\n", (unsigned long long)m->data_offset);
-    fprintf(stderr, "--------------------------------------------------------\n");
+     for (uint32_t i = 0; i < m->tensor_count; i++) {
+         vmm_tensor_meta_t* t = &m->meta[i];
 
-    uint64_t last_end = m->data_offset;
+         // skip unused / zeroed entries
+         if (t->size_bytes == 0 || t->offset == 0) {
+             continue;   // or `break;` if you know all remaining are zero
+         }
+         real_count++;
+         uint64_t start = t->offset;
+         uint64_t end = t->offset + t->size_bytes;
 
-    for (uint32_t i = 0; i < m->tensor_count; i++) {
-        vmm_tensor_meta_t* t = &m->meta[i];
+         if (start > last_end) {
+             fprintf(stderr,
+                 "  GAP: %llu bytes (0x%llX - 0x%llX)\n",
+                 (unsigned long long)(start - last_end),
+                 (unsigned long long)last_end,
+                 (unsigned long long)start);
+         }
 
-        // ⭐ SKIP EMPTY GGUF TENSORS ⭐
-        if (t->size_bytes == 0 || t->offset == 0)
-            continue;
+         fprintf(stderr,
+             "Tensor %4u | %-40s\n"
+             "  dtype=%u  dims=%u  size=%llu\n"
+             "  offset=0x%llX  end=0x%llX\n"
+             "  shape=[%llu %llu %llu %llu]\n"
+             "--------------------------------------------------------\n",
+             i,
+             t->name,
+             t->dtype,
+             t->n_dims,
+             (unsigned long long)t->size_bytes,
+             (unsigned long long)start,
+             (unsigned long long)end,
+             (unsigned long long)t->ne[0],
+             (unsigned long long)t->ne[1],
+             (unsigned long long)t->ne[2],
+             (unsigned long long)t->ne[3]
+         );
 
-        real_count++;
+         last_end = end;
+     }
 
-        uint64_t start = t->offset;
-        uint64_t end = t->offset + t->size_bytes;
+        fprintf(stderr, "[VMM] real tensors = %u\n", real_count);
 
-        // gap detection
-        if (start > last_end) {
-            fprintf(stderr,
-                "  GAP: %llu bytes (0x%llX - 0x%llX)\n",
-                (unsigned long long)(start - last_end),
-                (unsigned long long)last_end,
-                (unsigned long long)start);
-        }
+     fprintf(stderr, "================== END VMM INSPECTOR ==================\n\n");
+ }
 
-        fprintf(stderr,
-            "Tensor %4u | %-40s\n"
-            "  dtype=%u  dims=%u  size=%llu\n"
-            "  offset=0x%llX  end=0x%llX\n"
-            "  shape=[%llu %llu %llu %llu]\n"
-            "--------------------------------------------------------\n",
-            i,
-            t->name,
-            t->dtype,
-            t->n_dims,
-            (unsigned long long)t->size_bytes,
-            (unsigned long long)start,
-            (unsigned long long)end,
-            (unsigned long long)t->ne[0],
-            (unsigned long long)t->ne[1],
-            (unsigned long long)t->ne[2],
-            (unsigned long long)t->ne[3]
-        );
 
-        last_end = end;
-    }
-
-    fprintf(stderr, "[VMM] real tensors = %u\n", real_count);
-
-    fprintf(stderr, "================== END VMM INSPECTOR ==================\n\n");
-}
 
 
 
@@ -354,15 +353,26 @@ static int vmm_model_build_from_gguf(
         written++;
     }
 
+    // fix header to reflect what we actually wrote
     hdr->tensor_count = written;
+
+      
+    // (optional but nice) zero out the rest of meta
+    for (uint32_t i = written; i < (uint32_t)n; ++i) {
+        memset(&meta[i], 0, sizeof(meta[i]));
+    }
+
+    fprintf(stderr, "[VMM] build_from_gguf OK → %s (tensors=%u)\n",
+        vmm_path, written);
+
+   // NOW it is safe to destroy
 
     fclose(f);
     vmm_destroy(vmm);
     free(tensors);
     gguf_free(ctx);
 
-    fprintf(stderr, "[VMM] build_from_gguf OK → %s (tensors=%u)\n",
-        vmm_path, hdr->tensor_count);
+   
     return 0;
 }
 
